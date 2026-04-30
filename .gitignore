@@ -1,0 +1,33 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# Local editor / agent state
+.claude/
+.vscode/
+.idea/
+
+# Local runtime config and credentials
+token.json
+credentials.json
+google_oauth_token.json
+google_service_account.json
+*service-account*.json
+*service_account*.json
+*credentials*.json
+*.pem
+*.p12
+*.key
+
+# OS files
+Thumbs.db
+Desktop.ini
