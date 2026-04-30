@@ -22,6 +22,16 @@
 - 打包配置：`xml_merge_tool.spec`
 - 当前图标文件：`icon.png`
 
+## 发布新版本
+
+1. 修改 `table_merge_tool/version.py` 里的 `APP_VERSION`
+2. 双击 `make_release.bat`
+3. 在 GitHub Releases 创建对应 tag，例如 `v1.0.1`
+4. 上传 `release\FenJiuBiHe.zip` 和 `release\APP_VERSION.txt`
+
+软件启动后会读取 GitHub latest release 里的 `APP_VERSION.txt`。
+如果版本号高于本地 `APP_VERSION`，会提示用户下载并覆盖更新 `FenJiuBiHe.zip`。
+
 ## 当前支持的输入来源
 
 - 本地 `xml`
