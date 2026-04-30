@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressDialog,
+    QProgressBar,
     QPushButton,
     QSplitter,
     QStatusBar,
@@ -100,7 +101,7 @@ from .sources import (
     source_relative_path,
     source_path_name,
 )
-from .updater import UpdateInfo, apply_update, check_app_update
+from .updater import PreparedUpdate, UpdateInfo, check_app_update, launch_prepared_update, prepare_update
 from .version import APP_VERSION
 
 
@@ -1852,6 +1853,172 @@ class UpdateCheckWorker(QObject):
         self.finished.emit(info)
 
 
+class UpdatePrepareWorker(QObject):
+    progress = Signal(str, int, int)
+    finished = Signal(object)
+    failed = Signal(object)
+
+    def __init__(self, info: UpdateInfo) -> None:
+        super().__init__()
+        self._info = info
+
+    def run(self) -> None:
+        try:
+            prepared = prepare_update(
+                self._info,
+                progress_callback=lambda stage, current, total: self.progress.emit(stage, current, total),
+            )
+        except BaseException as exc:
+            self.failed.emit(exc)
+            return
+        self.finished.emit(prepared)
+
+
+class UpdateDialog(QDialog):
+    install_now_requested = Signal(object)
+    prepared_for_later = Signal(object)
+
+    def __init__(self, info: UpdateInfo, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._info = info
+        self._prepared: PreparedUpdate | None = None
+        self._thread: QThread | None = None
+        self._worker: UpdatePrepareWorker | None = None
+        self._running = False
+
+        self.setWindowTitle("软件更新")
+        self.resize(520, 260)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        title = QLabel(f"发现新版本 v{info.latest_version}")
+        title.setObjectName("dialogTitle")
+        layout.addWidget(title)
+        self.summary_label = QLabel(
+            f"当前版本：v{info.current_version}\n"
+            f"更新来源：{info.release_root}\n\n"
+            "下载和解压会在当前窗口内完成；安装时需要重启程序以覆盖正在运行的文件。"
+        )
+        self.summary_label.setWordWrap(True)
+        layout.addWidget(self.summary_label)
+
+        self.stage_label = QLabel("准备下载更新。")
+        layout.addWidget(self.stage_label)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_bar)
+
+        if info.notes:
+            notes = QTextEdit()
+            notes.setReadOnly(True)
+            notes.setMaximumHeight(72)
+            notes.setPlainText(info.notes)
+            layout.addWidget(notes)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        self.download_button = QPushButton("下载更新")
+        self.install_button = QPushButton("立即重启并安装")
+        self.later_button = QPushButton("稍后安装")
+        self.cancel_button = QPushButton("取消")
+        self.install_button.setEnabled(False)
+        self.later_button.setEnabled(False)
+        self.download_button.clicked.connect(self._start_prepare)
+        self.install_button.clicked.connect(self._install_now)
+        self.later_button.clicked.connect(self._install_later)
+        self.cancel_button.clicked.connect(self.reject)
+        button_row.addWidget(self.download_button)
+        button_row.addWidget(self.install_button)
+        button_row.addWidget(self.later_button)
+        button_row.addWidget(self.cancel_button)
+        layout.addLayout(button_row)
+
+    def reject(self) -> None:
+        if self._running:
+            QMessageBox.information(self, "更新进行中", "正在下载或解压更新包，请等待完成。")
+            return
+        super().reject()
+
+    def _start_prepare(self) -> None:
+        if self._thread is not None:
+            return
+        self._running = True
+        self.download_button.setEnabled(False)
+        self.cancel_button.setEnabled(False)
+        self.stage_label.setText("正在准备更新...")
+        self.progress_bar.setRange(0, 0)
+
+        thread = QThread(self)
+        worker = UpdatePrepareWorker(self._info)
+        worker.moveToThread(thread)
+        worker.progress.connect(self._on_progress)
+        worker.finished.connect(self._on_prepare_finished)
+        worker.failed.connect(self._on_prepare_failed)
+        thread.started.connect(worker.run)
+        self._thread = thread
+        self._worker = worker
+        thread.start()
+
+    def _on_progress(self, stage: str, current: int, total: int) -> None:
+        self.stage_label.setText(stage)
+        if total > 0:
+            self.progress_bar.setRange(0, total)
+            self.progress_bar.setValue(max(0, min(current, total)))
+            return
+        self.progress_bar.setRange(0, 0)
+
+    def _on_prepare_finished(self, prepared: object) -> None:
+        self._teardown_worker()
+        if not isinstance(prepared, PreparedUpdate):
+            self._on_prepare_failed(RuntimeError("更新准备结果无效。"))
+            return
+        self._prepared = prepared
+        self._running = False
+        self.stage_label.setText("更新包已下载并解压完成。")
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(1)
+        self.install_button.setEnabled(True)
+        self.later_button.setEnabled(True)
+        self.cancel_button.setText("关闭")
+        self.cancel_button.setEnabled(True)
+
+    def _on_prepare_failed(self, exc: object) -> None:
+        self._teardown_worker()
+        self._running = False
+        self.download_button.setEnabled(True)
+        self.cancel_button.setEnabled(True)
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.stage_label.setText("更新准备失败。")
+        QMessageBox.warning(self, "更新失败", str(exc))
+
+    def _teardown_worker(self) -> None:
+        thread = self._thread
+        worker = self._worker
+        self._thread = None
+        self._worker = None
+        if thread is not None:
+            thread.quit()
+            thread.wait(2000)
+            thread.deleteLater()
+        if worker is not None:
+            worker.deleteLater()
+
+    def _install_now(self) -> None:
+        if self._prepared is None:
+            return
+        self.install_now_requested.emit(self._prepared)
+        self.accept()
+
+    def _install_later(self) -> None:
+        if self._prepared is None:
+            return
+        self.prepared_for_later.emit(self._prepared)
+        self.accept()
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -1894,6 +2061,7 @@ class MainWindow(QMainWindow):
         self._update_thread: QThread | None = None
         self._update_worker: UpdateCheckWorker | None = None
         self._update_check_started = False
+        self._pending_prepared_update: PreparedUpdate | None = None
         self._column_width_cache: dict[tuple[str, str, int, int], list[int]] = {}
         self._duplicate_id_rows: list[dict[str, object]] = []
         self._last_side_dock_width = int(self.settings.get("side_dock_width", 360) or 360)
@@ -2445,6 +2613,12 @@ class MainWindow(QMainWindow):
         self._status_permanent_label = QLabel("")
         self._status_permanent_label.setStyleSheet("color: #667085; padding: 0 8px;")
         self.statusBar().addPermanentWidget(self._status_permanent_label)
+        self._pending_update_button = QPushButton("重启安装更新")
+        self._pending_update_button.setObjectName("pendingUpdateButton")
+        self._pending_update_button.setMaximumHeight(24)
+        self._pending_update_button.setVisible(False)
+        self._pending_update_button.clicked.connect(self._install_pending_update)
+        self.statusBar().addPermanentWidget(self._pending_update_button)
 
     def _wrap_table(self, title: str, table: QTableView) -> QWidget:
         widget = QFrame()
@@ -2622,6 +2796,11 @@ class MainWindow(QMainWindow):
                 font-weight: 800;
                 letter-spacing: 1px;
             }
+            QLabel#dialogTitle {
+                color: #111827;
+                font-size: 18px;
+                font-weight: 800;
+            }
             QLabel#appSubtitle {
                 color: #64748b;
                 font-size: 11px;
@@ -2742,6 +2921,21 @@ class MainWindow(QMainWindow):
             QPushButton#primaryButton:pressed {
                 background: #1e40af;
             }
+            QPushButton#pendingUpdateButton {
+                min-height: 22px;
+                max-height: 24px;
+                padding: 0 10px;
+                border-radius: 11px;
+                background: #fff7ed;
+                color: #9a3412;
+                border: 1px solid #fed7aa;
+                font-size: 12px;
+                font-weight: 800;
+            }
+            QPushButton#pendingUpdateButton:hover {
+                background: #ffedd5;
+                border-color: #fdba74;
+            }
             QPushButton#secondaryButton {
                 background: #f2f2f7;
                 color: #1d1d1f;
@@ -2842,6 +3036,20 @@ class MainWindow(QMainWindow):
             }
             QComboBox:focus, QLineEdit:focus {
                 border: 1px solid #2563eb;
+            }
+            QProgressBar {
+                min-height: 14px;
+                border: 1px solid #dbe3ee;
+                border-radius: 7px;
+                background: #f8fafc;
+                text-align: center;
+                color: #334155;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QProgressBar::chunk {
+                border-radius: 6px;
+                background: #2563eb;
             }
             QListWidget, QTableView, QTextEdit {
                 border: 1px solid #e1e7f0;
@@ -3425,32 +3633,35 @@ class MainWindow(QMainWindow):
             worker.deleteLater()
 
     def _prompt_apply_update(self, info: UpdateInfo) -> None:
-        box = QMessageBox(self)
-        box.setWindowTitle("发现新版本")
-        box.setIcon(QMessageBox.Information)
-        box.setText(f"发现新版本：v{info.latest_version}")
-        box.setInformativeText(
-            f"当前版本：v{info.current_version}\n"
-            f"更新来源：{info.release_root}\n\n"
-            "选择“更新”会下载发布目录，并在关闭当前程序后自动覆盖安装目录。"
-        )
-        if info.notes:
-            box.setDetailedText(info.notes)
-        update_button = box.addButton("更新", QMessageBox.AcceptRole)
-        cancel_button = box.addButton("取消", QMessageBox.RejectRole)
-        box.setDefaultButton(update_button)
-        box.exec()
-        if box.clickedButton() != update_button:
-            self.statusBar().showMessage("已取消更新。", 4000)
+        dialog = UpdateDialog(info, self)
+        dialog.install_now_requested.connect(self._launch_prepared_update)
+        dialog.prepared_for_later.connect(self._set_pending_update)
+        dialog.exec()
+
+    def _set_pending_update(self, prepared: object) -> None:
+        if not isinstance(prepared, PreparedUpdate):
             return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self._pending_prepared_update = prepared
+        self._pending_update_button.setVisible(True)
+        self.statusBar().showMessage(
+            f"v{prepared.info.latest_version} 更新已准备好，可点击右下角“重启安装更新”。",
+            8000,
+        )
+
+    def _install_pending_update(self) -> None:
+        if self._pending_prepared_update is None:
+            self._pending_update_button.setVisible(False)
+            return
+        self._launch_prepared_update(self._pending_prepared_update)
+
+    def _launch_prepared_update(self, prepared: object) -> None:
+        if not isinstance(prepared, PreparedUpdate):
+            return
         try:
-            apply_update(info)
+            launch_prepared_update(prepared)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(self, "更新失败", str(exc))
             return
-        finally:
-            QApplication.restoreOverrideCursor()
         QMessageBox.information(self, "开始更新", "更新脚本已启动，程序将退出并完成覆盖。")
         QApplication.quit()
 

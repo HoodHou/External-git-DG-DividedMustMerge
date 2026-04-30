@@ -8,6 +8,7 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from .sources import run_hidden_process, run_svn_command
 from .version import (
@@ -32,6 +33,18 @@ class UpdateInfo:
     source: str = "svn"
     package_url: str = ""
     notes: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedUpdate:
+    info: UpdateInfo
+    script_path: Path
+    release_dir: Path
+    temp_dir: Path
+    executable_path: Path
+
+
+ProgressCallback = Callable[[str, int, int], None]
 
 
 def check_app_update(current_version: str = APP_VERSION) -> UpdateInfo | None:
@@ -97,15 +110,35 @@ def check_http_zip_update(
 
 
 def apply_update(info: UpdateInfo, executable_path: str | None = None) -> Path:
+    prepared = prepare_update(info, executable_path=executable_path)
+    launch_prepared_update(prepared)
+    return prepared.script_path
+
+
+def prepare_update(
+    info: UpdateInfo,
+    executable_path: str | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> PreparedUpdate:
     source = str(info.source or "svn").strip().lower()
     if source == "svn":
-        return apply_svn_update(info, executable_path=executable_path)
+        return prepare_svn_update(info, executable_path=executable_path, progress_callback=progress_callback)
     if source == "github_zip":
-        return apply_zip_update(info, executable_path=executable_path)
+        return prepare_zip_update(info, executable_path=executable_path, progress_callback=progress_callback)
     raise RuntimeError(f"未知软件更新源类型: {info.source}")
 
 
 def apply_svn_update(info: UpdateInfo, executable_path: str | None = None) -> Path:
+    prepared = prepare_svn_update(info, executable_path=executable_path)
+    launch_prepared_update(prepared)
+    return prepared.script_path
+
+
+def prepare_svn_update(
+    info: UpdateInfo,
+    executable_path: str | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> PreparedUpdate:
     if not getattr(sys, "frozen", False):
         raise RuntimeError("源码运行模式不支持自动覆盖更新。请先打包成 exe 后再使用自动更新。")
 
@@ -113,6 +146,8 @@ def apply_svn_update(info: UpdateInfo, executable_path: str | None = None) -> Pa
     app_dir = exe_path.parent
     temp_dir = Path(tempfile.mkdtemp(prefix="fenjiubihe_update_"))
     export_dir = temp_dir / "release"
+    if progress_callback is not None:
+        progress_callback("正在导出更新包", 0, 0)
     command = ["svn", "export", "--force", info.release_root, str(export_dir)]
     process = run_hidden_process(command)
     if process.returncode != 0:
@@ -128,11 +163,22 @@ def apply_svn_update(info: UpdateInfo, executable_path: str | None = None) -> Pa
 
     script_path = temp_dir / "apply_update.bat"
     script_path.write_text(_build_update_script(export_dir, app_dir, exe_path, temp_dir), encoding="utf-8")
-    subprocess.Popen(["cmd.exe", "/c", str(script_path)], cwd=str(temp_dir), creationflags=subprocess.CREATE_NEW_CONSOLE)
-    return script_path
+    if progress_callback is not None:
+        progress_callback("更新包已准备好", 1, 1)
+    return PreparedUpdate(info=info, script_path=script_path, release_dir=export_dir, temp_dir=temp_dir, executable_path=exe_path)
 
 
 def apply_zip_update(info: UpdateInfo, executable_path: str | None = None) -> Path:
+    prepared = prepare_zip_update(info, executable_path=executable_path)
+    launch_prepared_update(prepared)
+    return prepared.script_path
+
+
+def prepare_zip_update(
+    info: UpdateInfo,
+    executable_path: str | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> PreparedUpdate:
     if not getattr(sys, "frozen", False):
         raise RuntimeError("源码运行模式不支持自动覆盖更新。请先打包成 exe 后再使用自动更新。")
 
@@ -141,7 +187,9 @@ def apply_zip_update(info: UpdateInfo, executable_path: str | None = None) -> Pa
     temp_dir = Path(tempfile.mkdtemp(prefix="fenjiubihe_update_"))
     zip_path = temp_dir / "release.zip"
     export_dir = temp_dir / "release"
-    _download_file(info.package_url or info.release_root, zip_path)
+    _download_file(info.package_url or info.release_root, zip_path, progress_callback=progress_callback)
+    if progress_callback is not None:
+        progress_callback("正在解压更新包", 0, 0)
     with zipfile.ZipFile(zip_path) as archive:
         archive.extractall(export_dir)
     release_dir = _find_release_dir(export_dir, exe_path.name)
@@ -149,11 +197,18 @@ def apply_zip_update(info: UpdateInfo, executable_path: str | None = None) -> Pa
         raise RuntimeError(
             f"更新 zip 中没有找到 {exe_path.name}。\n"
             "请确认 GitHub 发布包内包含打包后的完整发布目录。"
-        )
+    )
     script_path = temp_dir / "apply_update.bat"
     script_path.write_text(_build_update_script(release_dir, app_dir, exe_path, temp_dir), encoding="utf-8")
-    subprocess.Popen(["cmd.exe", "/c", str(script_path)], cwd=str(temp_dir), creationflags=subprocess.CREATE_NEW_CONSOLE)
-    return script_path
+    if progress_callback is not None:
+        progress_callback("更新包已准备好", 1, 1)
+    return PreparedUpdate(info=info, script_path=script_path, release_dir=release_dir, temp_dir=temp_dir, executable_path=exe_path)
+
+
+def launch_prepared_update(prepared: PreparedUpdate) -> Path:
+    creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if sys.platform.startswith("win") else 0
+    subprocess.Popen(["cmd.exe", "/c", str(prepared.script_path)], cwd=str(prepared.temp_dir), creationflags=creationflags)
+    return prepared.script_path
 
 
 def normalize_update_root(value: str) -> str:
@@ -217,10 +272,21 @@ def _download_text(url: str) -> str:
         return response.read().decode("utf-8-sig", errors="replace")
 
 
-def _download_file(url: str, output_path: Path) -> None:
+def _download_file(url: str, output_path: Path, progress_callback: ProgressCallback | None = None) -> None:
     request = urllib.request.Request(url, headers={"User-Agent": "FenJiuBiHe-Updater"})
     with urllib.request.urlopen(request, timeout=60) as response:
-        output_path.write_bytes(response.read())
+        total = int(response.headers.get("Content-Length") or 0)
+        downloaded = 0
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("wb") as handle:
+            while True:
+                chunk = response.read(1024 * 256)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                downloaded += len(chunk)
+                if progress_callback is not None:
+                    progress_callback("正在下载更新包", downloaded, total)
 
 
 def _find_release_dir(root: Path, exe_name: str) -> Path | None:
@@ -244,7 +310,7 @@ def _decode_process_output(data: bytes) -> str:
 
 
 def _build_update_script(export_dir: Path, app_dir: Path, exe_path: Path, temp_dir: Path) -> str:
-    return "\n".join(
+    return "\r\n".join(
         [
             "@echo off",
             "chcp 65001 >nul 2>nul",
