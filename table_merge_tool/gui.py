@@ -125,6 +125,8 @@ SIMPLIFIED_CELL_BACKGROUNDS = {
 SIMPLIFIED_CELL_BRUSHES = {key: QBrush(color) for key, color in SIMPLIFIED_CELL_BACKGROUNDS.items()}
 
 _HEADER_FOREGROUND_BRUSH = QBrush(QColor("#64748b"))
+_KEY_HEADER_BACKGROUND_BRUSH = QBrush(QColor("#dbeafe"))
+_KEY_HEADER_FOREGROUND_BRUSH = QBrush(QColor("#1d4ed8"))
 _GROUP_FOREGROUND_BRUSH = QBrush(QColor("#334155"))
 _NOTE_FOREGROUND_BRUSH = QBrush(QColor("#475569"))
 _DELETED_FOREGROUND_BRUSH = QBrush(QColor("#94a3b8"))
@@ -260,7 +262,13 @@ class MergeTableModel(QAbstractTableModel):
                 return self._header_title(column)
             if role == Qt.ToolTipRole:
                 return self._header_tooltip(column)
+            if role == Qt.BackgroundRole and normalize_header(column.key) in set(self.alignment.key_fields or []):
+                return _KEY_HEADER_BACKGROUND_BRUSH
+            if role == Qt.ForegroundRole and normalize_header(column.key) in set(self.alignment.key_fields or []):
+                return _KEY_HEADER_FOREGROUND_BRUSH
             if role == Qt.FontRole:
+                if normalize_header(column.key) in set(self.alignment.key_fields or []):
+                    return _FONT_VARIANTS[(True, False)]
                 if column.left_index is None or column.right_index is None:
                     return _FONT_VARIANTS[(True, False)]
                 return None
@@ -527,18 +535,21 @@ class MergeTableModel(QAbstractTableModel):
         return self._row_has_difference(row)
 
     def _header_title(self, column) -> str:
+        key_prefix = "ID " if normalize_header(column.key) in set(self.alignment.key_fields or []) else ""
         if column.left_index is None:
-            return f"{column.title} [+右列]"
+            return f"{key_prefix}{column.title} [+右列]"
         if column.right_index is None:
-            return f"{column.title} [-右列]"
-        return column.title
+            return f"{key_prefix}{column.title} [-右列]"
+        return f"{key_prefix}{column.title}"
 
     def _header_tooltip(self, column) -> str:
+        key_fields = set(self.alignment.key_fields or [])
+        key_line = "当前子表组合 ID 字段之一。\n" if normalize_header(column.key) in key_fields else ""
         if column.left_index is None:
-            return f"{column.title}\n该列仅存在于右侧，可视为右侧新增列。"
+            return f"{column.title}\n{key_line}该列仅存在于右侧，可视为右侧新增列。"
         if column.right_index is None:
-            return f"{column.title}\n该列仅存在于左侧，右侧缺失此列。"
-        return column.title
+            return f"{column.title}\n{key_line}该列仅存在于左侧，右侧缺失此列。"
+        return f"{column.title}\n{key_line}".strip()
 
 
 class SvnRepositoryBrowserDialog(QDialog):
@@ -2065,6 +2076,7 @@ class MainWindow(QMainWindow):
         self._column_width_cache: dict[tuple[str, str, int, int], list[int]] = {}
         self._duplicate_id_rows: list[dict[str, object]] = []
         self._last_side_dock_width = int(self.settings.get("side_dock_width", 360) or 360)
+        self._large_diff_confirmed_sheets: set[str] = set()
 
         self.sheet_list = QListWidget()
         self.sheet_list.setObjectName("sheetList")
@@ -3797,11 +3809,22 @@ class MainWindow(QMainWindow):
         self.key_fields_input.blockSignals(False)
         sheet_key_fields = config.get("sheet_key_fields")
         if isinstance(sheet_key_fields, dict):
-            self.settings["sheet_key_fields"] = {
-                str(sheet): normalize_header(field)
-                for sheet, field in sheet_key_fields.items()
-                if str(sheet).strip() and normalize_header(field)
-            }
+            normalized_sheet_keys: dict[str, list[str]] = {}
+            for sheet, field_value in sheet_key_fields.items():
+                sheet_name = str(sheet).strip()
+                if not sheet_name:
+                    continue
+                raw_fields = field_value if isinstance(field_value, list) else [field_value]
+                fields: list[str] = []
+                seen: set[str] = set()
+                for raw_field in raw_fields:
+                    field = normalize_header(raw_field)
+                    if field and field not in seen:
+                        fields.append(field)
+                        seen.add(field)
+                if fields:
+                    normalized_sheet_keys[sheet_name] = fields
+            self.settings["sheet_key_fields"] = normalized_sheet_keys
         self._update_key_field_ui()
         self._refresh_file_combos()
         self._apply_saved_file_selection(
@@ -4098,23 +4121,30 @@ class MainWindow(QMainWindow):
     def _strict_single_key_enabled(self) -> bool:
         return False
 
-    def _sheet_key_fields_map(self) -> dict[str, str]:
+    def _sheet_key_fields_map(self) -> dict[str, list[str]]:
         value = self.settings.get("sheet_key_fields", {}) if hasattr(self, "settings") else {}
         if not isinstance(value, dict):
             return {}
-        result: dict[str, str] = {}
-        for sheet_name, field_name in value.items():
+        result: dict[str, list[str]] = {}
+        for sheet_name, field_value in value.items():
             sheet = str(sheet_name or "").strip()
-            field = normalize_header(field_name)
-            if sheet and field:
-                result[sheet] = field
+            fields: list[str] = []
+            raw_fields = field_value if isinstance(field_value, list) else [field_value]
+            seen: set[str] = set()
+            for raw_field in raw_fields:
+                field = normalize_header(raw_field)
+                if field and field not in seen:
+                    fields.append(field)
+                    seen.add(field)
+            if sheet and fields:
+                result[sheet] = fields
         return result
 
     def _key_fields_for_sheet(self, sheet_name: str | None) -> list[str]:
         if sheet_name:
-            sheet_key = self._sheet_key_fields_map().get(str(sheet_name))
-            if sheet_key:
-                return [sheet_key]
+            sheet_keys = self._sheet_key_fields_map().get(str(sheet_name))
+            if sheet_keys:
+                return sheet_keys
         return self._manual_key_fields()
 
     def _strict_single_key_enabled_for_sheet(self, sheet_name: str | None) -> bool:
@@ -4566,6 +4596,7 @@ class MainWindow(QMainWindow):
         self._sheet_state_cache.clear()
         self._column_width_cache.clear()
         self._duplicate_id_rows = []
+        self._large_diff_confirmed_sheets.clear()
         self._cancel_sheet_state_warmup()
         self._remember_current_settings()
         self._refresh_sheet_list(schedule_warmup=False)
@@ -4753,27 +4784,51 @@ class MainWindow(QMainWindow):
         if not field_key:
             return
         sheet_name = str(self.current_sheet_name)
-        current_sheet_key = self._sheet_key_fields_map().get(sheet_name)
+        current_sheet_keys = self._sheet_key_fields_map().get(sheet_name, [])
+        is_selected_key = field_key in current_sheet_keys
         menu = QMenu(table)
-        set_action = menu.addAction(f"标记为当前子表 ID 列：{binding.title}")
-        clear_action = menu.addAction("取消当前子表 ID 列")
-        clear_action.setEnabled(bool(current_sheet_key))
+        set_action = menu.addAction(
+            f"{'取消' if is_selected_key else '加入'}组合 ID 字段：{binding.title}"
+        )
+        clear_action = menu.addAction("清空当前子表组合 ID")
+        clear_action.setEnabled(bool(current_sheet_keys))
         chosen = menu.exec(table.horizontalHeader().mapToGlobal(pos))
         if chosen is set_action:
-            self._set_sheet_id_check_field(sheet_name, field_key)
+            if is_selected_key:
+                self._remove_sheet_id_check_field(sheet_name, field_key)
+            else:
+                self._add_sheet_id_check_field(sheet_name, field_key)
         elif chosen is clear_action:
             self._clear_sheet_id_check_field(sheet_name)
 
-    def _set_sheet_id_check_field(self, sheet_name: str, field_key: str) -> None:
+    def _add_sheet_id_check_field(self, sheet_name: str, field_key: str) -> None:
         sheet_keys = self._sheet_key_fields_map()
-        sheet_keys[sheet_name] = normalize_header(field_key)
+        normalized = normalize_header(field_key)
+        fields = list(sheet_keys.get(sheet_name, []))
+        if normalized and normalized not in fields:
+            fields.append(normalized)
+        sheet_keys[sheet_name] = fields
         self.settings["sheet_key_fields"] = sheet_keys
         self._remember_current_settings()
         self._rebuild_sheet_alignment(sheet_name)
         self.statusBar().showMessage(
-            f"已标记 {sheet_name} 的 ID 列：{field_key}。后续比对会优先按该列对齐；空 ID 行仍按原规则匹配，不会强制排序。",
+            f"已更新 {sheet_name} 的组合 ID：{', '.join(fields)}。非空组合键优先对齐；空 ID 行仍按原规则匹配，不会强制排序。",
             7000,
         )
+
+    def _remove_sheet_id_check_field(self, sheet_name: str, field_key: str) -> None:
+        sheet_keys = self._sheet_key_fields_map()
+        normalized = normalize_header(field_key)
+        fields = [field for field in sheet_keys.get(sheet_name, []) if field != normalized]
+        if fields:
+            sheet_keys[sheet_name] = fields
+        else:
+            sheet_keys.pop(sheet_name, None)
+        self.settings["sheet_key_fields"] = sheet_keys
+        self._remember_current_settings()
+        self._rebuild_sheet_alignment(sheet_name)
+        label = ", ".join(fields) if fields else "未设置"
+        self.statusBar().showMessage(f"已更新 {sheet_name} 的组合 ID：{label}。", 5000)
 
     def _clear_sheet_id_check_field(self, sheet_name: str) -> None:
         sheet_keys = self._sheet_key_fields_map()
@@ -4783,7 +4838,7 @@ class MainWindow(QMainWindow):
         self.settings["sheet_key_fields"] = sheet_keys
         self._remember_current_settings()
         self._rebuild_sheet_alignment(sheet_name)
-        self.statusBar().showMessage(f"已取消 {sheet_name} 的 ID 列。", 5000)
+        self.statusBar().showMessage(f"已清空 {sheet_name} 的组合 ID 字段。", 5000)
 
     def _rebuild_sheet_alignment(self, sheet_name: str) -> None:
         self.alignments.pop(sheet_name, None)
@@ -4839,17 +4894,19 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "检测合并ID", "请先开始比对，并关闭纯比对模式以生成预合并结果。")
                 return
         assert self.middle_model is not None
-        field = self._sheet_key_fields_map().get(str(self.current_sheet_name))
-        if not field:
-            QMessageBox.information(self, "检测合并ID", "当前子表还没有标记 ID 列。请右键中间表或左右表的表头，选择“标记为当前子表 ID 列”。")
+        fields = self._sheet_key_fields_map().get(str(self.current_sheet_name), [])
+        if not fields:
+            QMessageBox.information(self, "检测合并ID", "当前子表还没有标记组合 ID。请右键中间表或左右表的表头，选择“加入组合 ID 字段”。")
             return
-        key_column = None
+        key_columns: list[int] = []
+        missing_fields = set(fields)
         for logical_index, binding in enumerate(self.middle_model.alignment.columns, start=1):
-            if normalize_header(binding.key) == field:
-                key_column = logical_index
-                break
-        if key_column is None:
-            QMessageBox.warning(self, "检测合并ID", f"当前合并结果中找不到 ID 字段：{field}")
+            key = normalize_header(binding.key)
+            if key in missing_fields:
+                key_columns.append(logical_index)
+                missing_fields.remove(key)
+        if missing_fields:
+            QMessageBox.warning(self, "检测合并ID", f"当前合并结果中找不到 ID 字段：{', '.join(sorted(missing_fields))}")
             return
 
         seen: dict[str, int] = {}
@@ -4859,14 +4916,15 @@ class MainWindow(QMainWindow):
         for row_index, row in enumerate(self.middle_model.alignment.rows, start=1):
             if row.status == "deleted" or row.merged_row.kind in {"blank", "header"}:
                 continue
-            value = row.merged_row.value_at(key_column).strip()
-            if not value:
+            values = [row.merged_row.value_at(column).strip() for column in key_columns]
+            if not all(values):
                 empty_count += 1
                 continue
+            value = " / ".join(values)
             checked_count += 1
             previous = seen.get(value)
             if previous is not None:
-                duplicates.append({"id": value, "first_row": previous, "row": row_index, "field": field})
+                duplicates.append({"id": value, "first_row": previous, "row": row_index, "field": ", ".join(fields)})
             else:
                 seen[value] = row_index
         self._duplicate_id_rows = duplicates
@@ -4876,7 +4934,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "检测合并ID",
-                f"检测完成：字段 {field}\n非空ID {checked_count} 个，未发现重复。\n空ID行 {empty_count} 行已按规则忽略。",
+                f"检测完成：组合 ID {', '.join(fields)}\n非空组合键 {checked_count} 个，未发现重复。\n空 ID 行 {empty_count} 行已按规则忽略。",
             )
             return
         lines = [f'{item["id"]}: 第 {item["first_row"]} 行 / 第 {item["row"]} 行' for item in duplicates[:20]]
@@ -4884,7 +4942,7 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(
             self,
             "检测合并ID",
-            f"字段 {field} 存在 {len(duplicates)} 处重复，已在下方列表显示，可双击定位：\n" + "\n".join(lines) + suffix,
+            f"组合 ID {', '.join(fields)} 存在 {len(duplicates)} 处重复，已在下方列表显示，可双击定位：\n" + "\n".join(lines) + suffix,
         )
 
     def _show_friendly_error(self, title: str, exc: BaseException, hint: str = "") -> None:
@@ -5070,7 +5128,47 @@ class MainWindow(QMainWindow):
             return
         if self.current_sheet_name != sheet_name:
             return
+        if not self._confirm_large_difference_if_needed(alignment):
+            self.detail_panel.setHtml(
+                "<b>已暂停渲染当前子表。</b><br>"
+                "这张表的差异量非常高，可能是左右文件选错或 ID 字段不合适。"
+            )
+            self.statusBar().showMessage("已取消渲染高差异子表；可调整文件或组合 ID 后重新开始比对。", 6000)
+            return
         self._set_alignment(alignment)
+
+    def _confirm_large_difference_if_needed(self, alignment: SheetAlignment) -> bool:
+        sheet_name = str(alignment.sheet_name)
+        if sheet_name in self._large_diff_confirmed_sheets:
+            return True
+        total_rows = max(len(alignment.rows), 1)
+        if total_rows < 50:
+            return True
+        changed_rows = sum(1 for row in alignment.rows if row.status != "same")
+        conflict_rows = sum(1 for row in alignment.rows if row.status == "conflict")
+        only_side_rows = sum(1 for row in alignment.rows if row.status in {"left_only", "right_only", "deleted"})
+        ratio = changed_rows / total_rows
+        if changed_rows < 30 or ratio < 0.65:
+            return True
+        box = QMessageBox(self)
+        box.setWindowTitle("差异量过高")
+        box.setIcon(QMessageBox.Warning)
+        box.setText(f"当前子表“{sheet_name}”差异量非常高，可能选错了左右文件。")
+        box.setInformativeText(
+            f"总行数：{total_rows}\n"
+            f"差异行：{changed_rows}（{ratio:.0%}）\n"
+            f"冲突行：{conflict_rows}\n"
+            f"仅单侧存在/删除行：{only_side_rows}\n\n"
+            "如果继续，界面仍会渲染该表，遇到大表可能明显卡顿。"
+        )
+        continue_button = box.addButton("继续渲染", QMessageBox.AcceptRole)
+        cancel_button = box.addButton("先不渲染", QMessageBox.RejectRole)
+        box.setDefaultButton(cancel_button)
+        box.exec()
+        if box.clickedButton() is continue_button:
+            self._large_diff_confirmed_sheets.add(sheet_name)
+            return True
+        return False
 
     def _get_alignment(self, sheet_name: str) -> SheetAlignment:
         if sheet_name in self.alignments:
@@ -5358,9 +5456,9 @@ class MainWindow(QMainWindow):
         if left_only_columns:
             column_parts.append(f"左独有 {left_only_columns} 列")
         column_suffix = f"，{ '，'.join(column_parts) }" if column_parts else ""
-        sheet_key = self._sheet_key_fields_map().get(alignment.sheet_name)
-        key_label = [sheet_key] if sheet_key else (alignment.key_fields or ["自动内容对齐"])
-        key_prefix = "子表ID" if sheet_key else "键"
+        sheet_keys = self._sheet_key_fields_map().get(alignment.sheet_name, [])
+        key_label = sheet_keys if sheet_keys else (alignment.key_fields or ["自动内容对齐"])
+        key_prefix = "组合ID" if sheet_keys else "键"
         self.statusBar().showMessage(
             f"表 {alignment.sheet_name}: 共 {len(alignment.rows)} 行，冲突 {alignment.conflict_count} 行{column_suffix}，{key_prefix} {key_label}，规则 {self._active_merge_rule().title}",
             8000,
@@ -5402,27 +5500,30 @@ class MainWindow(QMainWindow):
         return len(changed)
 
     def _find_merged_id_duplicates(self, alignment: SheetAlignment) -> list[dict[str, object]]:
-        field = self._sheet_key_fields_map().get(alignment.sheet_name)
-        if not field:
+        fields = self._sheet_key_fields_map().get(alignment.sheet_name, [])
+        if not fields:
             return []
-        key_column = None
+        key_columns: list[int] = []
+        missing_fields = set(fields)
         for logical_index, binding in enumerate(alignment.columns, start=1):
-            if normalize_header(binding.key) == field:
-                key_column = logical_index
-                break
-        if key_column is None:
+            key = normalize_header(binding.key)
+            if key in missing_fields:
+                key_columns.append(logical_index)
+                missing_fields.remove(key)
+        if missing_fields:
             return []
         seen: dict[str, int] = {}
         duplicates: list[dict[str, object]] = []
         for row_index, row in enumerate(alignment.rows, start=1):
             if row.status == "deleted" or row.merged_row.kind in {"blank", "header"}:
                 continue
-            value = row.merged_row.value_at(key_column).strip()
-            if not value:
+            values = [row.merged_row.value_at(column).strip() for column in key_columns]
+            if not all(values):
                 continue
+            value = " / ".join(values)
             previous = seen.get(value)
             if previous is not None:
-                duplicates.append({"id": value, "first_row": previous, "row": row_index, "field": field})
+                duplicates.append({"id": value, "first_row": previous, "row": row_index, "field": ", ".join(fields)})
             else:
                 seen[value] = row_index
         return duplicates
