@@ -9,6 +9,7 @@ __pycache__/
 # Build outputs
 build/
 dist/
+release/
 *.egg-info/
 
 # Local editor / agent state
