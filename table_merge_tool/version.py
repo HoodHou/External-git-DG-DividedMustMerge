@@ -9,8 +9,8 @@ APP_UPDATE_ENABLED = True
 APP_UPDATE_SOURCE = "github_zip"
 APP_UPDATE_SVN_URL = ""
 APP_UPDATE_VERSION_URL = (
-    "https://github.com/HoodHou/External-git-DG--DividedMustMerge/releases/latest/download/APP_VERSION.txt"
+    "https://github.com/HoodHou/External-git-DG-DividedMustMerge/releases/latest/download/APP_VERSION.txt"
 )
 APP_UPDATE_PACKAGE_URL = (
-    "https://github.com/HoodHou/External-git-DG--DividedMustMerge/releases/latest/download/FenJiuBiHe.zip"
+    "https://github.com/HoodHou/External-git-DG-DividedMustMerge/releases/latest/download/FenJiuBiHe.zip"
 )
