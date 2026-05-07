@@ -101,7 +101,7 @@ from .sources import (
     source_relative_path,
     source_path_name,
 )
-from .updater import PreparedUpdate, UpdateInfo, check_app_update, launch_prepared_update, prepare_update
+from .updater import PreparedUpdate, UpdateInfo, check_app_update, compare_versions, launch_prepared_update, prepare_update
 from .version import APP_VERSION
 
 
@@ -1855,9 +1855,13 @@ class UpdateCheckWorker(QObject):
     finished = Signal(object)
     failed = Signal(object)
 
+    def __init__(self, *, fetch_latest: bool = False) -> None:
+        super().__init__()
+        self._fetch_latest = fetch_latest
+
     def run(self) -> None:
         try:
-            info = check_app_update(APP_VERSION)
+            info = check_app_update("0.0.0" if self._fetch_latest else APP_VERSION)
         except BaseException as exc:
             self.failed.emit(exc)
             return
@@ -2072,6 +2076,7 @@ class MainWindow(QMainWindow):
         self._update_thread: QThread | None = None
         self._update_worker: UpdateCheckWorker | None = None
         self._update_check_started = False
+        self._manual_update_check_running = False
         self._pending_prepared_update: PreparedUpdate | None = None
         self._column_width_cache: dict[tuple[str, str, int, int], list[int]] = {}
         self._duplicate_id_rows: list[dict[str, object]] = []
@@ -2226,6 +2231,11 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(self.sheet_panel_toggle)
         nav_layout.addWidget(self.advanced_toggle)
         nav_layout.addStretch(1)
+        self.update_check_button = QPushButton(f"v{APP_VERSION}\n更新")
+        self.update_check_button.setObjectName("updateCheckButton")
+        self.update_check_button.setToolTip(f"当前版本 v{APP_VERSION}\n点击检查最新版本")
+        self.update_check_button.clicked.connect(self._manual_check_update)
+        nav_layout.addWidget(self.update_check_button)
 
         workspace = QWidget()
         workspace.setObjectName("workspaceRoot")
@@ -2760,6 +2770,26 @@ class MainWindow(QMainWindow):
                 background: #2563eb;
                 border-color: #2563eb;
                 color: #ffffff;
+            }
+            QPushButton#updateCheckButton {
+                min-height: 38px;
+                padding: 4px 2px;
+                border-radius: 12px;
+                border: 1px solid #223049;
+                background: #111827;
+                color: #94a3b8;
+                font-size: 10px;
+                font-weight: 700;
+            }
+            QPushButton#updateCheckButton:hover {
+                background: #1f2937;
+                color: #e5e7eb;
+                border-color: #334155;
+            }
+            QPushButton#updateCheckButton:disabled {
+                color: #64748b;
+                background: #0f172a;
+                border-color: #1e293b;
             }
             QFrame#card, QFrame#topBar, QFrame#sourcePanel, QFrame#sidePanel, QFrame#workspacePanel, QFrame#detailPanel, QFrame#tablePanel {
                 background: #ffffff;
@@ -3606,14 +3636,25 @@ class MainWindow(QMainWindow):
     def _check_update_on_startup(self) -> None:
         if self._update_check_started:
             return
-        self._start_update_check()
+        self._start_update_check(manual=False)
 
-    def _start_update_check(self) -> None:
+    def _manual_check_update(self) -> None:
+        self._start_update_check(manual=True)
+
+    def _start_update_check(self, *, manual: bool = False) -> None:
         if self._update_thread is not None:
+            if manual:
+                self.statusBar().showMessage("正在检测更新，请稍候。", 3000)
             return
-        self._update_check_started = True
+        if manual:
+            self._manual_update_check_running = True
+            self.update_check_button.setEnabled(False)
+            self.update_check_button.setText("检查中")
+            self.statusBar().showMessage("正在检查软件更新。", 3000)
+        else:
+            self._update_check_started = True
         thread = QThread(self)
-        worker = UpdateCheckWorker()
+        worker = UpdateCheckWorker(fetch_latest=manual)
         worker.moveToThread(thread)
         worker.finished.connect(self._on_update_check_finished)
         worker.failed.connect(self._on_update_check_failed)
@@ -3623,13 +3664,58 @@ class MainWindow(QMainWindow):
         thread.start()
 
     def _on_update_check_finished(self, info: object) -> None:
+        was_manual = self._manual_update_check_running
         self._teardown_update_worker()
+        if hasattr(self, "update_check_button"):
+            self.update_check_button.setEnabled(True)
         if not isinstance(info, UpdateInfo):
+            if was_manual:
+                self._set_update_button_version(APP_VERSION, latest_version="")
+                QMessageBox.information(
+                    self,
+                    "检查更新",
+                    f"当前版本：v{APP_VERSION}\n最新版本：未获取到\n\n当前没有可用更新，或更新源未启用。",
+                )
             return
-        self._prompt_apply_update(info)
+        latest_version = info.latest_version
+        self._set_update_button_version(APP_VERSION, latest_version=latest_version)
+        has_update = compare_versions(latest_version, APP_VERSION) > 0
+        if was_manual:
+            message = f"当前版本：v{APP_VERSION}\n最新版本：v{latest_version}"
+            if not has_update:
+                QMessageBox.information(self, "检查更新", message + "\n\n当前已是最新版本。")
+                return
+            choice = QMessageBox.question(
+                self,
+                "发现新版本",
+                message + "\n\n是否现在下载更新？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if choice != QMessageBox.Yes:
+                self.statusBar().showMessage(f"发现新版本 v{latest_version}，已暂不更新。", 5000)
+                return
+        if has_update:
+            update_info = UpdateInfo(
+                current_version=APP_VERSION,
+                latest_version=info.latest_version,
+                release_root=info.release_root,
+                version_target=info.version_target,
+                source=info.source,
+                package_url=info.package_url,
+                notes=info.notes,
+            )
+            self._prompt_apply_update(update_info)
 
     def _on_update_check_failed(self, exc: object) -> None:
+        was_manual = self._manual_update_check_running
         self._teardown_update_worker()
+        if hasattr(self, "update_check_button"):
+            self.update_check_button.setEnabled(True)
+            self.update_check_button.setText(f"v{APP_VERSION}\n更新")
+            self.update_check_button.setToolTip(f"当前版本 v{APP_VERSION}\n点击检查最新版本")
+        if was_manual:
+            QMessageBox.warning(self, "检查更新失败", f"当前版本：v{APP_VERSION}\n\n错误：{exc}")
         self.statusBar().showMessage(f"检测更新失败：{exc}", 6000)
 
     def _teardown_update_worker(self) -> None:
@@ -3637,12 +3723,25 @@ class MainWindow(QMainWindow):
         worker = self._update_worker
         self._update_thread = None
         self._update_worker = None
+        self._manual_update_check_running = False
         if thread is not None:
             thread.quit()
             thread.wait(2000)
             thread.deleteLater()
         if worker is not None:
             worker.deleteLater()
+
+    def _set_update_button_version(self, current_version: str, *, latest_version: str = "") -> None:
+        if not hasattr(self, "update_check_button"):
+            return
+        if latest_version:
+            self.update_check_button.setText(f"v{current_version}\n最新 {latest_version}")
+            self.update_check_button.setToolTip(
+                f"当前版本 v{current_version}\n最新版本 v{latest_version}\n点击重新检查"
+            )
+            return
+        self.update_check_button.setText(f"v{current_version}\n更新")
+        self.update_check_button.setToolTip(f"当前版本 v{current_version}\n点击检查最新版本")
 
     def _prompt_apply_update(self, info: UpdateInfo) -> None:
         dialog = UpdateDialog(info, self)
