@@ -1,0 +1,64 @@
+name: Publish release assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v1.0.2"
+        required: true
+        default: "v1.0.2"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyInstaller PySide6 lxml openpyxl requests google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Build release package
+        run: cmd /c make_release.bat
+
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          $version = (Get-Content release\APP_VERSION.txt -Raw).Trim()
+          $tagVersion = "${{ inputs.tag }}".TrimStart("v")
+          if ($version -ne $tagVersion) {
+            throw "APP_VERSION.txt is $version but tag is ${{ inputs.tag }}"
+          }
+
+      - name: Ensure GitHub release exists
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ inputs.tag }}"
+          if (-not (gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null)) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title $tag --notes "Release $tag"
+          }
+
+      - name: Upload release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.tag }}" release\APP_VERSION.txt release\FenJiuBiHe.zip --repo $env:GITHUB_REPOSITORY --clobber
