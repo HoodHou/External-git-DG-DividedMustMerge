@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QStatusBar,
     QTableView,
@@ -1069,16 +1070,20 @@ class QuickRootManagerDialog(QDialog):
 
         self.setWindowTitle("管理快捷配置")
         self.resize(860, 520)
+        self.setMinimumSize(760, 500)
 
         self.entry_list = QListWidget()
+        self.entry_list.setObjectName("quickEntryList")
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("例如：主干 core / 本地 normal")
         self.path_input = QLineEdit()
         self.path_input.setPlaceholderText("输入本地目录 / SVN 路径 / Google Sheets URL 或 ID")
-        self.preview_label = QLabel(
-            "在这里维护常用根路径，主界面只负责快速套用。支持直接粘贴 Google Sheets URL 或 ID，也支持直接选择 AutoXlsxtoXml 的 token.json。"
-        )
-        self.preview_label.setWordWrap(True)
+        self.preview_text = QTextEdit()
+        self.preview_text.setObjectName("quickPreviewText")
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setMinimumHeight(104)
+        self.preview_text.setMaximumHeight(148)
+        self.preview_text.setPlaceholderText("当前快捷项摘要会显示在这里。")
         self.google_auth_mode_combo = QComboBox()
         self.google_auth_mode_combo.addItem("服务账号", "service_account")
         self.google_auth_mode_combo.addItem("个人登录", "oauth_user")
@@ -1092,11 +1097,11 @@ class QuickRootManagerDialog(QDialog):
         self.google_oauth_token_input = QLineEdit(str(google_oauth_token_path or "").strip() or default_google_oauth_token_path())
         self.google_oauth_token_input.setPlaceholderText("可直接选择现成的 OAuth token.json，例如 AutoXlsxtoXml 的 token.json")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
         content_row = QHBoxLayout()
-        content_row.setSpacing(8)
+        content_row.setSpacing(10)
 
         left_panel = QVBoxLayout()
         left_panel.addWidget(QLabel("快捷项"))
@@ -1111,10 +1116,22 @@ class QuickRootManagerDialog(QDialog):
         left_panel.addLayout(left_actions)
         content_row.addLayout(left_panel, 2)
 
-        right_panel = QVBoxLayout()
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.NoFrame)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        right_content = QWidget()
+        right_content.setObjectName("quickRightContent")
+        right_panel = QVBoxLayout(right_content)
+        right_panel.setContentsMargins(0, 0, 8, 0)
+        right_panel.setSpacing(10)
         form_grid = QGridLayout()
         form_grid.setHorizontalSpacing(8)
         form_grid.setVerticalSpacing(6)
+        form_grid.setColumnMinimumWidth(0, 82)
+        form_grid.setColumnStretch(1, 1)
+        form_grid.setColumnStretch(2, 1)
+        form_grid.setColumnMinimumWidth(3, 118)
         form_grid.addWidget(QLabel("名称"), 0, 0)
         form_grid.addWidget(self.name_input, 0, 1, 1, 3)
         form_grid.addWidget(QLabel("路径"), 1, 0)
@@ -1157,16 +1174,21 @@ class QuickRootManagerDialog(QDialog):
         self.google_oauth_token_button = QPushButton("保存到...")
         self.google_oauth_token_button.clicked.connect(self._browse_google_oauth_token)
         form_grid.addWidget(self.google_oauth_token_button, 7, 3)
+        preview_title = QLabel("当前配置摘要")
+        preview_title.setObjectName("dialogSectionTitle")
         right_panel.addLayout(form_grid)
-        right_panel.addWidget(self.preview_label)
+        right_panel.addWidget(preview_title)
+        right_panel.addWidget(self.preview_text)
         right_panel.addStretch(1)
-        content_row.addLayout(right_panel, 3)
+        right_scroll.setWidget(right_content)
+        content_row.addWidget(right_scroll, 3)
 
         layout.addLayout(content_row, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self._apply_dialog_style()
 
         self.entry_list.currentRowChanged.connect(self._load_entry)
         self.path_input.textChanged.connect(self._update_preview)
@@ -1182,6 +1204,87 @@ class QuickRootManagerDialog(QDialog):
             self.entry_list.setCurrentRow(0)
         else:
             self._new_entry()
+
+    def _apply_dialog_style(self) -> None:
+        self.setStyleSheet(
+            """
+            QDialog {
+                background: #f5f7fb;
+                font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+                color: #111827;
+            }
+            QLabel {
+                color: #111827;
+                font-weight: 600;
+            }
+            QLabel#dialogSectionTitle {
+                color: #475569;
+                font-size: 12px;
+                font-weight: 800;
+                padding-top: 2px;
+            }
+            QListWidget#quickEntryList, QTextEdit#quickPreviewText {
+                background: #ffffff;
+                border: 1px solid #dfe7f1;
+                border-radius: 12px;
+                color: #111827;
+            }
+            QTextEdit#quickPreviewText {
+                padding: 6px;
+            }
+            QListWidget#quickEntryList::item {
+                min-height: 24px;
+                padding: 4px 8px;
+                border-radius: 8px;
+                border: 1px solid transparent;
+            }
+            QListWidget#quickEntryList::item:hover {
+                background: #f1f5f9;
+            }
+            QListWidget#quickEntryList::item:selected {
+                background: #dbeafe;
+                color: #1d4ed8;
+                border: 1px solid #bfdbfe;
+            }
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QWidget#quickRightContent {
+                background: transparent;
+            }
+            QLineEdit, QComboBox {
+                min-height: 30px;
+                padding: 0 10px;
+                background: #ffffff;
+                border: 1px solid #cbd5e1;
+                border-radius: 10px;
+                color: #111827;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border: 1px solid #2563eb;
+            }
+            QPushButton {
+                min-height: 30px;
+                padding: 0 14px;
+                background: #ffffff;
+                border: 1px solid #cbd5e1;
+                border-radius: 10px;
+                color: #111827;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background: #eff6ff;
+                border-color: #93c5fd;
+                color: #1d4ed8;
+            }
+            QPushButton:disabled {
+                background: #f1f5f9;
+                border-color: #e2e8f0;
+                color: #94a3b8;
+            }
+            """
+        )
 
     def accept(self) -> None:
         if self.name_input.text().strip() or self.path_input.text().strip():
@@ -1218,8 +1321,16 @@ class QuickRootManagerDialog(QDialog):
         self.entry_list.blockSignals(True)
         self.entry_list.clear()
         current_row = -1
+        name_counts: dict[str, int] = {}
+        for entry in self.entries:
+            name = entry["name"] or "(未命名)"
+            name_counts[name] = name_counts.get(name, 0) + 1
         for row, entry in enumerate(self.entries):
-            item = QListWidgetItem(entry["name"])
+            name = entry["name"] or "(未命名)"
+            item_label = name
+            if name_counts.get(name, 0) > 1:
+                item_label = f"{name}  ·  {self._compact_entry_path(entry['path'])}"
+            item = QListWidgetItem(item_label)
             item.setToolTip(entry["path"])
             self.entry_list.addItem(item)
             if entry["path"] == current_path:
@@ -1227,6 +1338,23 @@ class QuickRootManagerDialog(QDialog):
         self.entry_list.blockSignals(False)
         if current_row >= 0:
             self.entry_list.setCurrentRow(current_row)
+
+    @staticmethod
+    def _compact_entry_path(path: str) -> str:
+        normalized = str(path or "").replace("\\", "/").rstrip("/")
+        if not normalized:
+            return "(空路径)"
+        if is_google_sheets_target(normalized):
+            try:
+                parsed = parse_google_sheet_target(normalized)
+            except Exception:  # noqa: BLE001
+                return "Google Sheets"
+            gid = f"#{parsed['gid']}" if parsed.get("gid") else ""
+            return f"Google/{parsed['spreadsheet_id'][:10]}{gid}"
+        parts = [part for part in normalized.split("/") if part]
+        if len(parts) >= 3:
+            return "/".join(parts[-3:])
+        return "/".join(parts) or normalized
 
     def _load_entry(self, row: int) -> None:
         self._current_index = row
@@ -1277,7 +1405,7 @@ class QuickRootManagerDialog(QDialog):
         self._refresh_entry_list()
         self.entry_list.setCurrentRow(self._current_index)
         if show_message:
-            self.preview_label.setText(f"已保存快捷项：{name}")
+            self.preview_text.setPlainText(f"已保存快捷项：{name}")
         return True
 
     def _delete_entry(self) -> None:
@@ -1448,7 +1576,7 @@ class QuickRootManagerDialog(QDialog):
         if is_google_sheets_target(path):
             parsed = parse_google_sheet_target(path)
             gid_text = parsed["gid"] or "(未指定)"
-            self.preview_label.setText(
+            self.preview_text.setPlainText(
                 "名称：{name}\n类型：Google Sheets\nSpreadsheet ID：{spreadsheet_id}\nGID：{gid}\n路径：{path}\n"
                 "Google 认证：{auth_mode}\n服务账号：{service_account}\nOAuth 客户端：{oauth_client}\nOAuth Token：{oauth_token}".format(
                     name=name,
@@ -1462,7 +1590,7 @@ class QuickRootManagerDialog(QDialog):
                 )
             )
             return
-        self.preview_label.setText(
+        self.preview_text.setPlainText(
             "名称：{name}\n路径：{path}\nGoogle 认证：{auth_mode}\n服务账号：{service_account}\nOAuth 客户端：{oauth_client}\nOAuth Token：{oauth_token}".format(
                 name=name,
                 path=path,
@@ -2211,25 +2339,31 @@ class MainWindow(QMainWindow):
 
         nav_rail = QFrame()
         nav_rail.setObjectName("navRail")
-        nav_rail.setFixedWidth(72)
+        nav_rail.setFixedWidth(64)
         nav_layout = QVBoxLayout(nav_rail)
-        nav_layout.setContentsMargins(10, 14, 10, 14)
-        nav_layout.setSpacing(10)
+        nav_layout.setContentsMargins(8, 12, 8, 10)
+        nav_layout.setSpacing(8)
         app_badge = QLabel("合")
         app_badge.setObjectName("navBadge")
         app_badge.setAlignment(Qt.AlignCenter)
         nav_layout.addWidget(app_badge)
-        nav_layout.addSpacing(12)
+        nav_layout.addSpacing(8)
 
-        self.source_panel_toggle = self._make_nav_button("来源", lambda: self._toggle_side_panel("source"), checkable=True)
-        self.advanced_toggle.setObjectName("navButton")
+        self.source_panel_toggle = self._make_command_button(
+            "来源",
+            "配置",
+            lambda: self._toggle_top_panel("source"),
+            checkable=True,
+            tooltip="展开或收起左右文档来源配置",
+        )
+        self.advanced_toggle.setObjectName("commandButton")
         self.advanced_toggle.setCheckable(True)
-        self.advanced_toggle.setText("设置")
-        self.advanced_toggle.setMinimumHeight(46)
+        self.advanced_toggle.setText("合并设置")
+        self.advanced_toggle.setMinimumSize(72, 36)
+        self.advanced_toggle.setMaximumHeight(36)
+        self.advanced_toggle.setToolTip("展开或收起合并规则、文本比较和显示设置")
         self.sheet_panel_toggle = self._make_nav_button("子表", lambda: self._toggle_side_panel("sheet"), checkable=True)
-        nav_layout.addWidget(self.source_panel_toggle)
         nav_layout.addWidget(self.sheet_panel_toggle)
-        nav_layout.addWidget(self.advanced_toggle)
         nav_layout.addStretch(1)
         self.update_check_button = QPushButton(f"v{APP_VERSION}\n更新")
         self.update_check_button.setObjectName("updateCheckButton")
@@ -2240,14 +2374,14 @@ class MainWindow(QMainWindow):
         workspace = QWidget()
         workspace.setObjectName("workspaceRoot")
         workspace_layout = QVBoxLayout(workspace)
-        workspace_layout.setContentsMargins(12, 12, 12, 12)
-        workspace_layout.setSpacing(10)
+        workspace_layout.setContentsMargins(10, 10, 10, 10)
+        workspace_layout.setSpacing(8)
 
         command_bar = QFrame()
         command_bar.setObjectName("commandBar")
         command_layout = QHBoxLayout(command_bar)
-        command_layout.setContentsMargins(14, 10, 14, 10)
-        command_layout.setSpacing(8)
+        command_layout.setContentsMargins(14, 9, 14, 9)
+        command_layout.setSpacing(7)
         title_box = QFrame()
         title_box.setObjectName("appTitleBox")
         title_layout = QVBoxLayout(title_box)
@@ -2287,6 +2421,9 @@ class MainWindow(QMainWindow):
         ):
             command_layout.addWidget(button)
         self._add_command_separator(command_layout)
+        command_layout.addWidget(self.source_panel_toggle)
+        command_layout.addWidget(self.advanced_toggle)
+        self._add_command_separator(command_layout)
         for button in (
             self.prev_diff_button,
             self.next_diff_button,
@@ -2299,10 +2436,50 @@ class MainWindow(QMainWindow):
         command_layout.addWidget(self.search_input, 1)
         workspace_layout.addWidget(command_bar)
 
+        self.source_summary_bar = QFrame()
+        self.source_summary_bar.setObjectName("sourceSummaryBar")
+        source_summary_layout = QHBoxLayout(self.source_summary_bar)
+        source_summary_layout.setContentsMargins(12, 5, 12, 5)
+        source_summary_layout.setSpacing(8)
+        source_summary_layout.addWidget(QLabel("当前来源"))
+        self.source_summary_left_label = QLabel("左: 未选择")
+        self.source_summary_left_label.setObjectName("sourceSummaryText")
+        self.source_summary_right_label = QLabel("右: 未选择")
+        self.source_summary_right_label.setObjectName("sourceSummaryText")
+        self.source_summary_rule_label = QLabel("规则: 未选择")
+        self.source_summary_rule_label.setObjectName("sourceSummaryText")
+        source_summary_layout.addWidget(self.source_summary_left_label, 2)
+        source_summary_layout.addWidget(self.source_summary_right_label, 2)
+        source_summary_layout.addWidget(self.source_summary_rule_label, 1)
+        source_summary_layout.addStretch(1)
+        choose_left_summary_button = QPushButton("换左")
+        choose_left_summary_button.setObjectName("miniButton")
+        choose_left_summary_button.clicked.connect(lambda: self._choose_file("left"))
+        source_summary_layout.addWidget(choose_left_summary_button)
+        choose_right_summary_button = QPushButton("换右")
+        choose_right_summary_button.setObjectName("miniButton")
+        choose_right_summary_button.clicked.connect(lambda: self._choose_file("right"))
+        source_summary_layout.addWidget(choose_right_summary_button)
+        change_source_button = QPushButton("来源配置")
+        change_source_button.setObjectName("miniButton")
+        change_source_button.clicked.connect(lambda: self._toggle_top_panel("source"))
+        source_summary_layout.addWidget(change_source_button)
+        self.source_summary_bar.setVisible(False)
+        workspace_layout.addWidget(self.source_summary_bar)
+
+        self.top_option_panel = QFrame()
+        self.top_option_panel.setObjectName("topOptionPanel")
+        self.top_option_layout = QVBoxLayout(self.top_option_panel)
+        self.top_option_layout.setContentsMargins(10, 8, 10, 10)
+        self.top_option_layout.setSpacing(8)
+        self.top_option_panel.setVisible(False)
+        workspace_layout.addWidget(self.top_option_panel)
+
         filter_strip = QFrame()
         filter_strip.setObjectName("filterStrip")
+        self.filter_strip = filter_strip
         filter_layout = QHBoxLayout(filter_strip)
-        filter_layout.setContentsMargins(12, 8, 12, 8)
+        filter_layout.setContentsMargins(12, 7, 12, 7)
         filter_layout.setSpacing(8)
         filter_layout.addWidget(self.compare_only_mode)
         filter_layout.addWidget(self.three_way_checkbox)
@@ -2325,18 +2502,37 @@ class MainWindow(QMainWindow):
         sheet_shell.setObjectName("sheetShell")
         sheet_shell_layout = QVBoxLayout(sheet_shell)
         sheet_shell_layout.setContentsMargins(0, 0, 0, 0)
-        sheet_shell_layout.setSpacing(10)
+        sheet_shell_layout.setSpacing(8)
         self.sheet_shell = sheet_shell
+
+        self.side_drawer_header = QFrame()
+        self.side_drawer_header.setObjectName("sideDrawerHeader")
+        side_header_layout = QHBoxLayout(self.side_drawer_header)
+        side_header_layout.setContentsMargins(12, 10, 10, 8)
+        side_header_layout.setSpacing(8)
+        side_title_box = QVBoxLayout()
+        side_title_box.setContentsMargins(0, 0, 0, 0)
+        side_title_box.setSpacing(0)
+        self.side_drawer_title = QLabel("子表")
+        self.side_drawer_title.setObjectName("sideDrawerTitle")
+        self.side_drawer_subtitle = QLabel("工作表导航")
+        self.side_drawer_subtitle.setObjectName("sideDrawerSubtitle")
+        side_title_box.addWidget(self.side_drawer_title)
+        side_title_box.addWidget(self.side_drawer_subtitle)
+        side_header_layout.addLayout(side_title_box, 1)
+        self.side_drawer_close_button = QPushButton("×")
+        self.side_drawer_close_button.setObjectName("drawerCloseButton")
+        self.side_drawer_close_button.setFixedSize(28, 28)
+        self.side_drawer_close_button.setToolTip("收起左侧面板")
+        self.side_drawer_close_button.clicked.connect(lambda: self._activate_side_panel(""))
+        side_header_layout.addWidget(self.side_drawer_close_button)
+        sheet_shell_layout.addWidget(self.side_drawer_header)
 
         self.source_panel = QFrame()
         self.source_panel.setObjectName("sourcePanel")
         source_panel_layout = QVBoxLayout(self.source_panel)
-        source_panel_layout.setContentsMargins(10, 10, 10, 10)
-        source_panel_layout.setSpacing(10)
-
-        source_title = QLabel("文档来源")
-        source_title.setObjectName("panelTitle")
-        source_panel_layout.addWidget(source_title)
+        source_panel_layout.setContentsMargins(10, 0, 10, 10)
+        source_panel_layout.setSpacing(8)
 
         source_grid = QGridLayout()
         source_grid.setHorizontalSpacing(6)
@@ -2373,8 +2569,9 @@ class MainWindow(QMainWindow):
         right_source_layout.addWidget(self.right_file_label, 2, 1)
 
         source_grid.addWidget(left_source_card, 0, 0)
-        source_grid.addWidget(right_source_card, 1, 0)
+        source_grid.addWidget(right_source_card, 0, 1)
         source_grid.setColumnStretch(0, 1)
+        source_grid.setColumnStretch(1, 1)
         source_panel_layout.addLayout(source_grid)
 
         same_name_button = QPushButton("右侧同名")
@@ -2384,14 +2581,13 @@ class MainWindow(QMainWindow):
         refresh_cache_button = QPushButton("刷新缓存")
         refresh_cache_button.setToolTip("清空工作簿 / SVN 版本 / Google 元数据缓存，强制下次对比重新拉取。")
         refresh_cache_button.clicked.connect(self._refresh_sources_caches)
-        quick_actions = QGridLayout()
-        quick_actions.setHorizontalSpacing(6)
-        quick_actions.setVerticalSpacing(6)
-        quick_actions.addWidget(manage_quick_button, 0, 0, 1, 2)
-        quick_actions.addWidget(same_name_button, 1, 0)
-        quick_actions.addWidget(refresh_cache_button, 1, 1)
+        quick_actions = QHBoxLayout()
+        quick_actions.setSpacing(6)
+        quick_actions.addWidget(manage_quick_button)
+        quick_actions.addWidget(same_name_button)
+        quick_actions.addWidget(refresh_cache_button)
+        quick_actions.addStretch(1)
         source_panel_layout.addLayout(quick_actions)
-        source_panel_layout.addStretch(1)
 
         # Base (three-way) row is intentionally separate so the pick button never stretches across the path area.
         self._base_row_container = QWidget()
@@ -2418,52 +2614,22 @@ class MainWindow(QMainWindow):
         self.base_file_label.setVisible(False)
         self._base_row_container.setVisible(False)
 
-        sheet_shell_layout.addWidget(self.source_panel)
+        self.source_panel.setVisible(False)
+        self.top_option_layout.addWidget(self.source_panel)
 
         self.advanced_panel = QWidget()
         self.advanced_panel.setObjectName("optionTray")
-        advanced_row = QVBoxLayout(self.advanced_panel)
-        advanced_row.setContentsMargins(10, 10, 10, 10)
-        advanced_row.setSpacing(8)
-        advanced_title = QLabel("合并设置")
-        advanced_title.setObjectName("panelTitle")
-        advanced_row.addWidget(advanced_title)
-
-        merge_card = QFrame()
-        merge_card.setObjectName("compactSourceCard")
-        merge_layout = QGridLayout(merge_card)
-        merge_layout.setContentsMargins(8, 8, 8, 8)
-        merge_layout.setHorizontalSpacing(6)
-        merge_layout.setVerticalSpacing(6)
-        merge_layout.addWidget(QLabel("默认规则"), 0, 0)
-        merge_layout.addWidget(self.rule_combo, 0, 1)
-        merge_layout.addWidget(QLabel("模板来源"), 1, 0)
-        merge_layout.addWidget(self.template_source_combo, 1, 1)
-        advanced_row.addWidget(merge_card)
-
-        text_card = QFrame()
-        text_card.setObjectName("compactSourceCard")
-        text_layout = QGridLayout(text_card)
-        text_layout.setContentsMargins(8, 8, 8, 8)
-        text_layout.setHorizontalSpacing(6)
-        text_layout.setVerticalSpacing(6)
-        text_layout.addWidget(self.ignore_all_whitespace_diff, 0, 0, 1, 2)
-        text_layout.addWidget(self.ignore_case_diff, 1, 0, 1, 2)
-        text_layout.addWidget(self.normalize_fullwidth_diff, 2, 0, 1, 2)
-        text_layout.addWidget(QLabel("容差"), 3, 0)
-        text_layout.addWidget(self.numeric_tolerance_input, 3, 1)
-        advanced_row.addWidget(text_card)
-
-        key_card = QFrame()
-        key_card.setObjectName("compactSourceCard")
-        key_layout = QGridLayout(key_card)
-        key_layout.setContentsMargins(8, 8, 8, 8)
-        key_layout.setHorizontalSpacing(6)
-        key_layout.setVerticalSpacing(6)
-        key_layout.addWidget(QLabel("关键字段"), 0, 0)
-        key_layout.addWidget(self.key_fields_input, 0, 1)
-        key_layout.addWidget(self.key_fields_button, 1, 1)
-        advanced_row.addWidget(key_card)
+        advanced_grid = QGridLayout(self.advanced_panel)
+        advanced_grid.setContentsMargins(8, 0, 8, 8)
+        advanced_grid.setHorizontalSpacing(8)
+        advanced_grid.setVerticalSpacing(6)
+        advanced_grid.addWidget(QLabel("默认规则"), 0, 0)
+        advanced_grid.addWidget(self.rule_combo, 0, 1)
+        advanced_grid.addWidget(QLabel("模板来源"), 0, 2)
+        advanced_grid.addWidget(self.template_source_combo, 0, 3)
+        advanced_grid.addWidget(QLabel("关键字段"), 0, 4)
+        advanced_grid.addWidget(self.key_fields_input, 0, 5)
+        advanced_grid.addWidget(self.key_fields_button, 0, 6)
 
         self.font_size_combo = QComboBox()
         for size in (8, 9, 10, 11, 12, 13, 14):
@@ -2474,26 +2640,25 @@ class MainWindow(QMainWindow):
         self.header_height_combo = QComboBox()
         for height in (24, 28, 32, 40, 56, 72, 96, 128):
             self.header_height_combo.addItem(f"表头 {height}", height)
-        display_card = QFrame()
-        display_card.setObjectName("compactSourceCard")
-        display_layout = QGridLayout(display_card)
-        display_layout.setContentsMargins(8, 8, 8, 8)
-        display_layout.setHorizontalSpacing(6)
-        display_layout.setVerticalSpacing(6)
-        display_layout.addWidget(QLabel("字号"), 0, 0)
-        display_layout.addWidget(self.font_size_combo, 0, 1)
-        display_layout.addWidget(self.row_height_combo, 1, 0)
-        display_layout.addWidget(self.header_height_combo, 1, 1)
-        advanced_row.addWidget(display_card)
-        advanced_row.addStretch(1)
+        advanced_grid.addWidget(self.ignore_all_whitespace_diff, 1, 0, 1, 2)
+        advanced_grid.addWidget(self.ignore_case_diff, 1, 2)
+        advanced_grid.addWidget(self.normalize_fullwidth_diff, 1, 3)
+        advanced_grid.addWidget(QLabel("容差"), 1, 4)
+        advanced_grid.addWidget(self.numeric_tolerance_input, 1, 5)
+        advanced_grid.addWidget(self.font_size_combo, 1, 6)
+        advanced_grid.addWidget(self.row_height_combo, 1, 7)
+        advanced_grid.addWidget(self.header_height_combo, 1, 8)
+        advanced_grid.setColumnStretch(1, 2)
+        advanced_grid.setColumnStretch(3, 1)
+        advanced_grid.setColumnStretch(5, 2)
         self.advanced_panel.setVisible(False)
-        sheet_shell_layout.addWidget(self.advanced_panel)
+        self.top_option_layout.addWidget(self.advanced_panel)
 
         left_panel = self._make_card()
         left_panel.setObjectName("sidePanel")
         self.sheet_panel = left_panel
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(8, 8, 8, 8)
+        left_layout.setContentsMargins(8, 0, 8, 8)
         left_layout.setSpacing(6)
         sheet_header_row = QHBoxLayout()
         sheet_header_row.setContentsMargins(2, 0, 2, 0)
@@ -2514,8 +2679,11 @@ class MainWindow(QMainWindow):
         main_panel = self._make_card()
         main_panel.setObjectName("workspacePanel")
         main_layout = QVBoxLayout(main_panel)
-        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setContentsMargins(7, 7, 7, 7)
         main_layout.setSpacing(6)
+
+        self.prepare_panel = self._build_prepare_panel()
+        main_layout.addWidget(self.prepare_panel, 1)
 
         self.merge_action_bar = QWidget()
         self.merge_action_bar.setObjectName("mergeActionBar")
@@ -2563,11 +2731,17 @@ class MainWindow(QMainWindow):
         self.overview_conflict_button.setObjectName("pillConflict")
         self.overview_changed_columns_button.setObjectName("pillChanged")
         self.overview_duplicate_id_button.setObjectName("pillDuplicate")
-        self.overview_added_button.clicked.connect(lambda: self._jump_to_row_status({"right_only"}))
-        self.overview_deleted_button.clicked.connect(lambda: self._jump_to_row_status({"left_only", "deleted"}))
-        self.overview_conflict_button.clicked.connect(lambda: self._jump_to_row_status({"conflict"}))
-        self.overview_changed_columns_button.clicked.connect(self._show_changed_columns_summary)
-        self.overview_duplicate_id_button.clicked.connect(self._show_duplicate_ids)
+        self.overview_added_button.clicked.connect(
+            lambda: self._jump_to_row_status({"right_only"}, "新增")
+        )
+        self.overview_deleted_button.clicked.connect(
+            lambda: self._jump_to_row_status({"left_only", "deleted"}, "删除")
+        )
+        self.overview_conflict_button.clicked.connect(
+            lambda: self._jump_to_row_status({"conflict"}, "冲突")
+        )
+        self.overview_changed_columns_button.clicked.connect(self._jump_to_changed_row)
+        self.overview_duplicate_id_button.clicked.connect(self._jump_to_next_duplicate_id)
         for button in (
             self.overview_added_button,
             self.overview_deleted_button,
@@ -2590,8 +2764,8 @@ class MainWindow(QMainWindow):
         detail_container = self._make_card()
         detail_container.setObjectName("detailPanel")
         detail_layout = QVBoxLayout(detail_container)
-        detail_layout.setContentsMargins(8, 6, 8, 8)
-        detail_layout.setSpacing(5)
+        detail_layout.setContentsMargins(7, 5, 7, 7)
+        detail_layout.setSpacing(4)
         detail_header = QFrame()
         detail_header.setObjectName("detailHeaderBar")
         detail_header_layout = QHBoxLayout(detail_header)
@@ -2617,7 +2791,8 @@ class MainWindow(QMainWindow):
         vertical_splitter.addWidget(detail_container)
         vertical_splitter.setCollapsible(0, False)
         vertical_splitter.setCollapsible(1, True)
-        vertical_splitter.setSizes([720, 120])
+        vertical_splitter.setSizes([760, 104])
+        self.table_area_splitter = vertical_splitter
         main_layout.addWidget(vertical_splitter, 1)
 
         body_splitter.addWidget(main_panel)
@@ -2626,7 +2801,12 @@ class MainWindow(QMainWindow):
         initial_side_width = self._clamp_side_dock_width(self._last_side_dock_width)
         body_splitter.setSizes([initial_side_width, 1280])
         active_side_panel = str(self.settings.get("active_side_panel", "sheet") or "sheet")
-        self._activate_side_panel(active_side_panel, save=False)
+        active_top_panel = str(self.settings.get("active_top_panel", "") or "")
+        if active_side_panel in {"source", "settings"} and not active_top_panel:
+            active_top_panel = active_side_panel
+            active_side_panel = ""
+        self._activate_side_panel(active_side_panel if active_side_panel == "sheet" else "", save=False)
+        self._activate_top_panel(active_top_panel, save=False)
         workspace_layout.addWidget(body_splitter, 1)
         root_layout.addWidget(nav_rail)
         root_layout.addWidget(workspace, 1)
@@ -2641,6 +2821,125 @@ class MainWindow(QMainWindow):
         self._pending_update_button.setVisible(False)
         self._pending_update_button.clicked.connect(self._install_pending_update)
         self.statusBar().addPermanentWidget(self._pending_update_button)
+
+    def _build_prepare_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("preparePanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        hero = QHBoxLayout()
+        hero.setSpacing(14)
+        title_box = QVBoxLayout()
+        title_box.setSpacing(4)
+        title = QLabel("准备开始比对")
+        title.setObjectName("prepareTitle")
+        subtitle = QLabel("选择左右文档后直接开始；复杂路径、SVN、Google 配置可从“来源”展开。")
+        subtitle.setObjectName("prepareSubtitle")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        hero.addLayout(title_box, 1)
+        open_source_button = QPushButton("打开来源配置")
+        open_source_button.setObjectName("prepareSecondaryButton")
+        open_source_button.clicked.connect(lambda: self._toggle_top_panel("source"))
+        hero.addWidget(open_source_button)
+        layout.addLayout(hero)
+
+        cards = QHBoxLayout()
+        cards.setSpacing(14)
+        cards.addWidget(self._build_prepare_source_card("left", "左侧文档"), 1)
+        cards.addWidget(self._build_prepare_source_card("right", "右侧文档"), 1)
+        layout.addLayout(cards)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
+        self.prepare_match_button = QPushButton("右侧同名")
+        self.prepare_match_button.setObjectName("prepareSecondaryButton")
+        self.prepare_match_button.clicked.connect(self._match_right_file_by_left_name)
+        action_row.addWidget(self.prepare_match_button)
+        action_row.addStretch(1)
+        self.prepare_hint_label = QLabel("未选择左右文档")
+        self.prepare_hint_label.setObjectName("prepareHint")
+        action_row.addWidget(self.prepare_hint_label)
+        self.prepare_start_button = QPushButton("开始比对")
+        self.prepare_start_button.setObjectName("preparePrimaryButton")
+        self.prepare_start_button.clicked.connect(self._start_compare)
+        action_row.addWidget(self.prepare_start_button)
+        layout.addLayout(action_row)
+        layout.addStretch(1)
+        return panel
+
+    def _build_prepare_source_card(self, side: str, title: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("prepareSourceCard")
+        card.setMaximumHeight(260)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        title_label = QLabel(title)
+        title_label.setObjectName("prepareCardTitle")
+        header.addWidget(title_label)
+        header.addStretch(1)
+        type_label = QLabel("未配置")
+        type_label.setObjectName("prepareBadge")
+        header.addWidget(type_label)
+        layout.addLayout(header)
+
+        quick_row = QHBoxLayout()
+        quick_row.setSpacing(8)
+        quick_label = QLabel("快捷")
+        quick_label.setObjectName("preparePath")
+        quick_combo = QComboBox()
+        quick_combo.setObjectName("prepareQuickCombo")
+        quick_combo.setMinimumContentsLength(18)
+        quick_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        quick_combo.currentIndexChanged.connect(lambda index, s=side: self._apply_prepare_quick_root(s, index))
+        quick_row.addWidget(quick_label)
+        quick_row.addWidget(quick_combo, 1)
+        layout.addLayout(quick_row)
+
+        root_row = QHBoxLayout()
+        root_row.setSpacing(8)
+        root_label = QLabel("路径")
+        root_label.setObjectName("preparePath")
+        root_combo = QComboBox()
+        root_combo.setObjectName("prepareRootCombo")
+        root_combo.setEditable(True)
+        root_combo.setInsertPolicy(QComboBox.NoInsert)
+        root_combo.setMinimumContentsLength(32)
+        root_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        root_combo.activated.connect(lambda _index, s=side: self._apply_prepare_root_text(s))
+        if root_combo.lineEdit() is not None:
+            root_combo.lineEdit().editingFinished.connect(lambda s=side: self._apply_prepare_root_text(s))
+        root_row.addWidget(root_label)
+        root_row.addWidget(root_combo, 1)
+        file_label = QLabel("快照: 未选择")
+        file_label.setObjectName("prepareFile")
+        file_label.setWordWrap(True)
+        file_label.setMinimumHeight(64)
+        file_label.setMaximumHeight(88)
+        layout.addLayout(root_row)
+        layout.addWidget(file_label)
+
+        choose_button = QPushButton(f"选择{title}")
+        choose_button.setObjectName("prepareChooseButton")
+        choose_button.clicked.connect(lambda: self._choose_file(side))
+        layout.addWidget(choose_button)
+
+        if side == "left":
+            self.prepare_left_quick_combo = quick_combo
+            self.prepare_left_type_label = type_label
+            self.prepare_left_root_combo = root_combo
+            self.prepare_left_file_label = file_label
+        else:
+            self.prepare_right_quick_combo = quick_combo
+            self.prepare_right_type_label = type_label
+            self.prepare_right_root_combo = root_combo
+            self.prepare_right_file_label = file_label
+        return card
 
     def _wrap_table(self, title: str, table: QTableView) -> QWidget:
         widget = QFrame()
@@ -2697,7 +2996,7 @@ class MainWindow(QMainWindow):
         button = QPushButton(text)
         button.setObjectName("navButton")
         button.setCheckable(checkable)
-        button.setMinimumHeight(46)
+        button.setMinimumHeight(40)
         if handler is not None:
             button.clicked.connect(handler)
         return button
@@ -2714,8 +3013,8 @@ class MainWindow(QMainWindow):
     ) -> QPushButton:
         button = QPushButton(f"{title}{subtitle}")
         button.setObjectName("commandPrimaryButton" if primary else "commandButton")
-        button.setMinimumSize(76, 38)
-        button.setMaximumHeight(38)
+        button.setMinimumSize(72, 36)
+        button.setMaximumHeight(36)
         button.setCheckable(checkable)
         if tooltip:
             button.setToolTip(tooltip)
@@ -2726,45 +3025,46 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(
             """
             QMainWindow {
-                background: #eef1f5;
+                background: #f5f7fb;
                 font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
-                color: #172033;
+                color: #111827;
             }
             QWidget#appRoot {
-                background: #eef1f5;
+                background: #f5f7fb;
             }
             QWidget#workspaceRoot {
-                background: #eef1f5;
+                background: #f5f7fb;
             }
             QFrame#navRail {
-                background: #111827;
+                background: #fbfcfe;
                 border: none;
+                border-right: 1px solid #e5eaf2;
             }
             QLabel#navBadge {
-                min-width: 42px;
-                max-width: 42px;
-                min-height: 42px;
-                max-height: 42px;
-                border-radius: 14px;
-                background: #38bdf8;
+                min-width: 40px;
+                max-width: 40px;
+                min-height: 40px;
+                max-height: 40px;
+                border-radius: 12px;
+                background: #2563eb;
                 color: #ffffff;
-                font-size: 22px;
+                font-size: 20px;
                 font-weight: 900;
             }
             QPushButton#navButton {
-                min-height: 46px;
+                min-height: 40px;
                 padding: 0;
-                border-radius: 14px;
-                border: 1px solid #273449;
-                background: #182235;
-                color: #cbd5e1;
+                border-radius: 12px;
+                border: 1px solid transparent;
+                background: transparent;
+                color: #64748b;
                 font-size: 12px;
                 font-weight: 800;
             }
             QPushButton#navButton:hover {
-                background: #25324a;
-                border-color: #3a4a68;
-                color: #ffffff;
+                background: #eef4ff;
+                border-color: #dbeafe;
+                color: #1d4ed8;
             }
             QPushButton#navButton:checked {
                 background: #2563eb;
@@ -2774,39 +3074,40 @@ class MainWindow(QMainWindow):
             QPushButton#updateCheckButton {
                 min-height: 38px;
                 padding: 4px 2px;
-                border-radius: 12px;
-                border: 1px solid #223049;
-                background: #111827;
-                color: #94a3b8;
+                border-radius: 11px;
+                border: 1px solid #e2e8f0;
+                background: #f8fafc;
+                color: #64748b;
                 font-size: 10px;
                 font-weight: 700;
             }
             QPushButton#updateCheckButton:hover {
-                background: #1f2937;
-                color: #e5e7eb;
-                border-color: #334155;
+                background: #eff6ff;
+                color: #1d4ed8;
+                border-color: #bfdbfe;
             }
             QPushButton#updateCheckButton:disabled {
-                color: #64748b;
-                background: #0f172a;
-                border-color: #1e293b;
+                color: #94a3b8;
+                background: #f1f5f9;
+                border-color: #e2e8f0;
             }
-            QFrame#card, QFrame#topBar, QFrame#sourcePanel, QFrame#sidePanel, QFrame#workspacePanel, QFrame#detailPanel, QFrame#tablePanel {
+            QFrame#card, QFrame#topBar, QFrame#workspacePanel, QFrame#detailPanel, QFrame#tablePanel {
                 background: #ffffff;
-                border: 1px solid #dde3ec;
-                border-radius: 18px;
+                border: 1px solid #e1e8f2;
+                border-radius: 16px;
             }
             QFrame#topBar {
                 background: #ffffff;
-                border: 1px solid #d7dfeb;
+                border: 1px solid #dce5f0;
             }
             QFrame#workspacePanel {
                 background: #ffffff;
+                border: 1px solid #dfe7f1;
             }
             QFrame#tablePanel {
                 background: #ffffff;
-                border: 1px solid #e1e7f0;
-                border-radius: 16px;
+                border: 1px solid #e4ecf5;
+                border-radius: 14px;
             }
             QFrame#quickBox {
                 background: #f7f7fa;
@@ -2819,14 +3120,49 @@ class MainWindow(QMainWindow):
                 border-radius: 14px;
             }
             QFrame#commandBar {
-                background: #f8fafc;
-                border: 1px solid #e0e7ef;
+                background: #ffffff;
+                border: 1px solid #dfe7f1;
                 border-radius: 16px;
             }
             QFrame#filterStrip {
                 background: #ffffff;
-                border: 1px solid #dde3ec;
+                border: 1px solid #e4ecf5;
+                border-radius: 14px;
+            }
+            QFrame#sourceSummaryBar {
+                background: #ffffff;
+                border: 1px solid #e6edf5;
+                border-radius: 14px;
+            }
+            QFrame#topOptionPanel {
+                background: #ffffff;
+                border: 1px solid #dfe7f1;
                 border-radius: 16px;
+            }
+            QLabel#sourceSummaryText {
+                color: #334155;
+                font-size: 12px;
+                font-weight: 700;
+                padding: 2px 8px;
+                background: #f8fafc;
+                border: 1px solid #edf2f7;
+                border-radius: 9px;
+            }
+            QPushButton#miniButton {
+                min-height: 26px;
+                max-height: 26px;
+                padding: 0 12px;
+                border-radius: 9px;
+                border: 1px solid #dbe5f0;
+                background: #ffffff;
+                color: #334155;
+                font-size: 12px;
+                font-weight: 800;
+            }
+            QPushButton#miniButton:hover {
+                background: #eff6ff;
+                color: #1d4ed8;
+                border-color: #bfdbfe;
             }
             QFrame#appTitleBox {
                 background: transparent;
@@ -2866,6 +3202,40 @@ class MainWindow(QMainWindow):
                 font-weight: 800;
                 padding: 0 0 4px 2px;
             }
+            QFrame#sideDrawerHeader {
+                background: transparent;
+                border: none;
+                border-bottom: 1px solid #e8eef6;
+                border-radius: 0;
+            }
+            QLabel#sideDrawerTitle {
+                color: #111827;
+                font-size: 15px;
+                font-weight: 900;
+            }
+            QLabel#sideDrawerSubtitle {
+                color: #64748b;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton#drawerCloseButton {
+                min-width: 28px;
+                max-width: 28px;
+                min-height: 28px;
+                max-height: 28px;
+                padding: 0;
+                border-radius: 9px;
+                background: #f8fafc;
+                color: #64748b;
+                border: 1px solid #e2e8f0;
+                font-size: 15px;
+                font-weight: 800;
+            }
+            QPushButton#drawerCloseButton:hover {
+                background: #eef2ff;
+                color: #1d4ed8;
+                border-color: #c7d2fe;
+            }
             QLabel#sheetSummary {
                 color: #64748b;
                 font-size: 11px;
@@ -2873,12 +3243,19 @@ class MainWindow(QMainWindow):
                 padding: 2px 4px 5px 4px;
             }
             QFrame#compactSourceCard {
-                background: #f8fafc;
-                border: 1px solid #e2e8f0;
+                background: #fbfcfe;
+                border: 1px solid #e7edf5;
                 border-radius: 12px;
             }
             QWidget#sheetShell {
+                background: #ffffff;
+                border: 1px solid #dfe7f1;
+                border-radius: 18px;
+            }
+            QFrame#sourcePanel, QFrame#sidePanel, QWidget#optionTray {
                 background: transparent;
+                border: none;
+                border-radius: 0;
             }
             QWidget#sheetRail {
                 background: #172033;
@@ -2919,9 +3296,103 @@ class MainWindow(QMainWindow):
                 color: #6e6e73;
             }
             QFrame#tableHeaderBar, QFrame#detailHeaderBar {
+                background: #fbfcfe;
+                border: 1px solid #edf3f8;
+                border-radius: 10px;
+            }
+            QFrame#preparePanel {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #ffffff, stop:1 #f3f7ff);
+                border: 1px solid #dfe7f1;
+                border-radius: 18px;
+            }
+            QFrame#prepareSourceCard {
+                background: rgba(255, 255, 255, 230);
+                border: 1px solid #dfe8f3;
+                border-radius: 16px;
+            }
+            QLabel#prepareTitle {
+                color: #0f172a;
+                font-size: 24px;
+                font-weight: 900;
+            }
+            QLabel#prepareSubtitle {
+                color: #64748b;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QLabel#prepareCardTitle {
+                color: #0f172a;
+                font-size: 15px;
+                font-weight: 900;
+            }
+            QLabel#prepareBadge {
+                color: #1d4ed8;
+                background: #dbeafe;
+                border: 1px solid #bfdbfe;
+                border-radius: 10px;
+                padding: 2px 10px;
+                font-size: 11px;
+                font-weight: 900;
+            }
+            QLabel#preparePath {
+                color: #64748b;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QLabel#prepareFile {
+                color: #172033;
+                font-size: 13px;
+                font-weight: 800;
                 background: #f8fafc;
                 border: 1px solid #edf2f7;
-                border-radius: 10px;
+                border-radius: 12px;
+                padding: 10px;
+            }
+            QLabel#prepareHint {
+                color: #64748b;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QPushButton#preparePrimaryButton {
+                min-height: 42px;
+                padding: 0 28px;
+                border-radius: 14px;
+                background: #2563eb;
+                color: #ffffff;
+                border: 1px solid #2563eb;
+                font-size: 14px;
+                font-weight: 900;
+            }
+            QPushButton#preparePrimaryButton:hover {
+                background: #1d4ed8;
+                border-color: #1d4ed8;
+            }
+            QPushButton#preparePrimaryButton:disabled {
+                background: #cbd5e1;
+                border-color: #cbd5e1;
+                color: #f8fafc;
+            }
+            QPushButton#prepareSecondaryButton, QPushButton#prepareChooseButton {
+                min-height: 34px;
+                padding: 0 18px;
+                border-radius: 12px;
+                background: #ffffff;
+                border: 1px solid #cbd5e1;
+                color: #172033;
+                font-weight: 800;
+            }
+            QPushButton#prepareSecondaryButton:hover, QPushButton#prepareChooseButton:hover {
+                background: #eff6ff;
+                border-color: #93c5fd;
+                color: #1d4ed8;
+            }
+            QComboBox#prepareQuickCombo, QComboBox#prepareRootCombo {
+                min-height: 32px;
+                background: #ffffff;
+                border: 1px solid #d6e0ec;
+                border-radius: 11px;
+                color: #172033;
+                font-weight: 700;
             }
             QLabel#tableTitle, QLabel#detailTitle, QLabel#overviewTitle {
                 font-size: 12px;
@@ -2992,11 +3463,11 @@ class MainWindow(QMainWindow):
                 background: #ffffff;
             }
             QPushButton#commandButton, QPushButton#commandPrimaryButton {
-                min-height: 38px;
-                max-height: 38px;
-                min-width: 76px;
-                padding: 0 14px;
-                border-radius: 13px;
+                min-height: 36px;
+                max-height: 36px;
+                min-width: 72px;
+                padding: 0 13px;
+                border-radius: 12px;
                 font-size: 12px;
                 font-weight: 700;
                 background: #ffffff;
@@ -3128,7 +3599,7 @@ class MainWindow(QMainWindow):
                 padding: 4px 8px;
                 border-radius: 8px;
             }
-            QWidget#mergeActionBar, QWidget#sheetOverviewBar, QWidget#optionTray {
+            QWidget#mergeActionBar, QWidget#sheetOverviewBar {
                 background: #f8fafc;
                 border: 1px solid #e2e8f0;
                 border-radius: 14px;
@@ -3156,12 +3627,12 @@ class MainWindow(QMainWindow):
                 background: #ffffff;
             }
             QHeaderView::section {
-                background: #f8fafc;
+                background: #f6f9fc;
                 color: #334155;
                 padding: 1px 4px;
                 border: none;
-                border-right: 1px solid #e2e8f0;
-                border-bottom: 1px solid #d7dee8;
+                border-right: 1px solid #edf2f7;
+                border-bottom: 1px solid #dfe7f1;
                 font-weight: 700;
             }
             QCheckBox {
@@ -3285,7 +3756,7 @@ class MainWindow(QMainWindow):
         self.row_height_combo.currentIndexChanged.connect(self._on_table_spacing_changed)
         self.header_height_combo.currentIndexChanged.connect(self._on_table_spacing_changed)
         self.history_combo.currentIndexChanged.connect(self._apply_history_selection)
-        self.advanced_toggle.clicked.connect(lambda: self._toggle_side_panel("settings"))
+        self.advanced_toggle.clicked.connect(lambda: self._toggle_top_panel("settings"))
         self.changed_sheets_only.toggled.connect(lambda: self._refresh_sheet_list(self.current_sheet_name))
         self.three_way_checkbox.toggled.connect(self._on_three_way_toggled)
         self._populate_root_combos()
@@ -3346,44 +3817,67 @@ class MainWindow(QMainWindow):
         self.three_way_checkbox.setChecked(bool(self.settings.get("three_way_enabled", False)))
         self.three_way_checkbox.blockSignals(False)
         self._on_three_way_toggled(self.three_way_checkbox.isChecked())
+        self._update_workspace_mode()
         self.statusBar().showMessage("请选择左右两个 XML 文件，然后点击“开始比对”。", 8000)
         QTimer.singleShot(900, self._check_update_on_startup)
 
     def _toggle_advanced_panel(self, checked: bool) -> None:
-        self.advanced_panel.setVisible(checked)
-        self.advanced_toggle.setText("设置")
-        self._update_side_dock_width()
+        self._activate_top_panel("settings" if checked else "")
 
-    def _activate_side_panel(self, panel_name: str, *, save: bool = True) -> None:
-        if not all(hasattr(self, name) for name in ("source_panel", "sheet_panel", "advanced_panel")):
+    def _activate_top_panel(self, panel_name: str, *, save: bool = True) -> None:
+        if not all(hasattr(self, name) for name in ("top_option_panel", "source_panel", "advanced_panel")):
             return
-        active = panel_name if panel_name in {"source", "sheet", "settings"} else ""
+        active = panel_name if panel_name in {"source", "settings"} else ""
         self.source_panel.setVisible(active == "source")
-        self.sheet_panel.setVisible(active == "sheet")
         self.advanced_panel.setVisible(active == "settings")
+        self.top_option_panel.setVisible(bool(active))
         for button, name in (
             (self.source_panel_toggle, "source"),
-            (self.sheet_panel_toggle, "sheet"),
             (self.advanced_toggle, "settings"),
         ):
             button.blockSignals(True)
             button.setChecked(active == name)
             button.blockSignals(False)
+        if save:
+            self.settings["active_top_panel"] = active
+            self.settings["source_panel_collapsed"] = active != "source"
+            save_settings(self.settings)
+
+    def _current_top_panel(self) -> str:
+        if getattr(self, "source_panel", None) is not None and not self.source_panel.isHidden():
+            return "source"
+        if getattr(self, "advanced_panel", None) is not None and not self.advanced_panel.isHidden():
+            return "settings"
+        return ""
+
+    def _toggle_top_panel(self, panel_name: str) -> None:
+        if self._current_top_panel() == panel_name:
+            self._activate_top_panel("")
+            return
+        self._activate_top_panel(panel_name)
+
+    def _activate_side_panel(self, panel_name: str, *, save: bool = True) -> None:
+        if not hasattr(self, "sheet_panel"):
+            return
+        active = "sheet" if panel_name == "sheet" else ""
+        self.sheet_panel.setVisible(active == "sheet")
+        if hasattr(self, "side_drawer_header"):
+            self.side_drawer_header.setVisible(bool(active))
+            self.side_drawer_title.setText("子表")
+            self.side_drawer_subtitle.setText("工作表导航与变更状态")
+        self.sheet_panel_toggle.blockSignals(True)
+        self.sheet_panel_toggle.setChecked(active == "sheet")
+        self.sheet_panel_toggle.blockSignals(False)
         self._update_side_dock_width()
         if save:
             self.settings["active_side_panel"] = active
-            self.settings["source_panel_collapsed"] = active != "source"
             self.settings["sheet_panel_collapsed"] = active != "sheet"
             self.settings["side_dock_width"] = self._last_side_dock_width
             save_settings(self.settings)
 
     def _current_side_panel(self) -> str:
-        if getattr(self, "source_panel", None) is not None and not self.source_panel.isHidden():
-            return "source"
         if getattr(self, "sheet_panel", None) is not None and not self.sheet_panel.isHidden():
             return "sheet"
-        if getattr(self, "advanced_panel", None) is not None and not self.advanced_panel.isHidden():
-            return "settings"
         return ""
 
     def _toggle_side_panel(self, panel_name: str) -> None:
@@ -3393,19 +3887,10 @@ class MainWindow(QMainWindow):
         self._activate_side_panel(panel_name)
 
     def _toggle_source_panel(self) -> None:
-        self._toggle_side_panel("source")
+        self._toggle_top_panel("source")
 
     def _apply_source_panel_state(self, collapsed: bool, *, save: bool = True) -> None:
-        if not hasattr(self, "source_panel") or not hasattr(self, "source_panel_toggle"):
-            return
-        self.source_panel.setVisible(not collapsed)
-        self.source_panel_toggle.setChecked(not collapsed)
-        self.source_panel_toggle.setText("来源")
-        self.source_panel_toggle.setToolTip("展开顶部来源配置区" if collapsed else "收起顶部来源配置区")
-        self._update_side_dock_width()
-        if save:
-            self.settings["source_panel_collapsed"] = collapsed
-            save_settings(self.settings)
+        self._activate_top_panel("" if collapsed else "source", save=save)
 
     def _toggle_sheet_panel(self) -> None:
         self._toggle_side_panel("sheet")
@@ -3426,16 +3911,14 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "sheet_shell"):
             return
         panels = [
-            getattr(self, "source_panel", None),
             getattr(self, "sheet_panel", None),
-            getattr(self, "advanced_panel", None),
         ]
         visible = any(panel is not None and not panel.isHidden() for panel in panels)
         self.sheet_shell.setVisible(visible)
         if visible:
             width = self._clamp_side_dock_width(self._last_side_dock_width)
-            self.sheet_shell.setMinimumWidth(280)
-            self.sheet_shell.setMaximumWidth(640)
+            self.sheet_shell.setMinimumWidth(260)
+            self.sheet_shell.setMaximumWidth(520)
             if hasattr(self, "content_splitter"):
                 total = max(1, sum(self.content_splitter.sizes()))
                 self.content_splitter.setSizes([width, max(700, total - width)])
@@ -3448,7 +3931,7 @@ class MainWindow(QMainWindow):
             self.content_splitter.setSizes([0, max(700, total)])
 
     def _clamp_side_dock_width(self, width: int) -> int:
-        return max(280, min(640, int(width or 360)))
+        return max(260, min(520, int(width or 320)))
 
     def _remember_side_dock_width(self) -> None:
         if not hasattr(self, "content_splitter"):
@@ -3533,11 +4016,16 @@ class MainWindow(QMainWindow):
 
     def _populate_root_combos(self) -> None:
         root_choices = self._combined_root_choices()
-        for side, combo, current in (
+        combo_entries = [
             ("left", self.left_root_combo, str(self.left_folder_path or "")),
             ("right", self.right_root_combo, str(self.right_folder_path or "")),
             ("base", self.base_root_combo, str(self.base_folder_path or "")),
-        ):
+        ]
+        if hasattr(self, "prepare_left_root_combo"):
+            combo_entries.append(("left", self.prepare_left_root_combo, str(self.left_folder_path or "")))
+        if hasattr(self, "prepare_right_root_combo"):
+            combo_entries.append(("right", self.prepare_right_root_combo, str(self.right_folder_path or "")))
+        for side, combo, current in combo_entries:
             combo.blockSignals(True)
             combo.clear()
             combo.addItems(root_choices)
@@ -3549,11 +4037,16 @@ class MainWindow(QMainWindow):
 
     def _populate_quick_root_combos(self) -> None:
         quick_roots = list(self.settings.get("quick_roots", []))
-        for combo, active_root in (
+        combo_pairs = [
             (self.left_quick_combo, str(self.left_folder_path or "")),
             (self.right_quick_combo, str(self.right_folder_path or "")),
             (self.base_quick_combo, str(self.base_folder_path or "")),
-        ):
+        ]
+        if hasattr(self, "prepare_left_quick_combo"):
+            combo_pairs.append((self.prepare_left_quick_combo, str(self.left_folder_path or "")))
+        if hasattr(self, "prepare_right_quick_combo"):
+            combo_pairs.append((self.prepare_right_quick_combo, str(self.right_folder_path or "")))
+        for combo, active_root in combo_pairs:
             current_path = active_root or str(combo.currentData() or "")
             combo.blockSignals(True)
             combo.clear()
@@ -3564,6 +4057,28 @@ class MainWindow(QMainWindow):
             combo.setCurrentIndex(target_index)
             combo.setToolTip(str(combo.currentData() or ""))
             combo.blockSignals(False)
+
+    def _apply_prepare_quick_root(self, side: str, index: int) -> None:
+        if index <= 0:
+            return
+        combo = self.prepare_left_quick_combo if side == "left" else self.prepare_right_quick_combo
+        root = str(combo.itemData(index) or "").strip()
+        if not root:
+            return
+        self._set_root_value(side, root)
+        combo.setToolTip(root)
+        side_label = "左" if side == "left" else "右"
+        self.statusBar().showMessage(f"已套用{side_label}侧快捷路径，下一步选择文档。", 4000)
+
+    def _apply_prepare_root_text(self, side: str) -> None:
+        combo = self.prepare_left_root_combo if side == "left" else self.prepare_right_root_combo
+        root = combo.currentText().strip()
+        current = str((self.left_folder_path if side == "left" else self.right_folder_path) or "").strip()
+        if not root or root == current:
+            return
+        self._set_root_value(side, root)
+        side_label = "左" if side == "left" else "右"
+        self.statusBar().showMessage(f"已更新{side_label}侧路径，下一步选择文档。", 4000)
 
     def _combined_root_choices(self) -> list[str]:
         choices: list[str] = []
@@ -3829,6 +4344,7 @@ class MainWindow(QMainWindow):
         if is_google and value:
             self._update_snapshot_label(side)
         self._remember_current_settings()
+        self._update_prepare_panel()
 
     def _on_file_combo_changed(self, side: str, text: str) -> None:
         if self._suspend_auto_selection:
@@ -3844,6 +4360,7 @@ class MainWindow(QMainWindow):
                 self.pending_right_path = None
                 self.right_file_label.setText("右侧快照: 未选择")
                 self.right_file_label.setToolTip("")
+            self._update_prepare_panel()
             return
         file_path = self._join_selected_target(side, folder, file_name)
         if self._selected_source_kind(side) == SOURCE_LOCAL and not Path(file_path).exists():
@@ -3857,6 +4374,7 @@ class MainWindow(QMainWindow):
     def _update_snapshot_label(self, side: str) -> None:
         file_path = self._current_selected_file_path(side)
         if file_path is None:
+            self._update_prepare_panel()
             return
         source_kind = self._selected_source_kind(side)
         file_name = self._display_file_name_for_side(side, file_path)
@@ -3873,6 +4391,93 @@ class MainWindow(QMainWindow):
         else:
             self.base_file_label.setText(f"Base: {label}")
             self.base_file_label.setToolTip(file_path)
+        self._update_prepare_panel()
+
+    def _has_active_compare(self) -> bool:
+        return self.left_workbook is not None and self.right_workbook is not None
+
+    def _side_snapshot_summary(self, side: str) -> tuple[str, str]:
+        file_path = self._current_selected_file_path(side)
+        if file_path is None:
+            return "未选择文档", ""
+        source_kind = self._selected_source_kind(side)
+        file_name = self._display_file_name_for_side(side, file_path)
+        if source_kind == SOURCE_SVN:
+            file_name = f"{file_name}@{self._selected_revision(side)}"
+        return file_name, file_path
+
+    @staticmethod
+    def _compact_display_path(value: str, *, limit: int = 92) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return "未配置"
+        if len(text) <= limit:
+            return text
+        normalized = text.replace("\\", "/")
+        parts = [part for part in normalized.split("/") if part]
+        suffix = "/".join(parts[-4:]) if len(parts) >= 4 else text[-limit + 3 :]
+        return f".../{suffix}" if len(suffix) + 4 <= limit else f"...{text[-limit + 3:]}"
+
+    def _update_prepare_panel(self) -> None:
+        if not hasattr(self, "prepare_panel"):
+            return
+        for side in ("left", "right"):
+            root = self.left_folder_path if side == "left" else self.right_folder_path
+            type_label = self.prepare_left_type_label if side == "left" else self.prepare_right_type_label
+            file_label = self.prepare_left_file_label if side == "left" else self.prepare_right_file_label
+            source_kind = self._selected_source_kind(side)
+            snapshot, tooltip = self._side_snapshot_summary(side)
+            type_label.setText(SOURCE_LABELS.get(source_kind, source_kind.upper()))
+            root_combo = self.prepare_left_root_combo if side == "left" else self.prepare_right_root_combo
+            current_root = str(root or "")
+            if root_combo.currentText() != current_root:
+                root_combo.blockSignals(True)
+                if current_root and root_combo.findText(current_root) < 0:
+                    root_combo.addItem(current_root)
+                root_combo.setCurrentText(current_root)
+                root_combo.blockSignals(False)
+            root_combo.setToolTip(current_root)
+            file_label.setText(f"快照: {snapshot}")
+            file_label.setToolTip(tooltip)
+
+        left_snapshot, left_tooltip = self._side_snapshot_summary("left")
+        right_snapshot, right_tooltip = self._side_snapshot_summary("right")
+        self.source_summary_left_label.setText(f"左: {left_snapshot}")
+        self.source_summary_right_label.setText(f"右: {right_snapshot}")
+        self.source_summary_left_label.setToolTip(left_tooltip)
+        self.source_summary_right_label.setToolTip(right_tooltip)
+        self.source_summary_rule_label.setText(f"规则: {self._active_merge_rule().title}")
+
+        left_ready = self._current_selected_file_path("left") is not None
+        right_ready = self._current_selected_file_path("right") is not None
+        ready = left_ready and right_ready
+        if hasattr(self, "prepare_start_button"):
+            self.prepare_start_button.setEnabled(ready)
+        if hasattr(self, "prepare_match_button"):
+            self.prepare_match_button.setEnabled(left_ready)
+        if hasattr(self, "prepare_hint_label"):
+            self.prepare_hint_label.setText("已选择左右文档，可以开始比对" if ready else "先选择左右两个文档")
+
+    def _update_workspace_mode(self, *, prefer_sheet: bool = False) -> None:
+        has_compare = self._has_active_compare()
+        if hasattr(self, "prepare_panel"):
+            self.prepare_panel.setVisible(not has_compare)
+        if hasattr(self, "table_area_splitter"):
+            self.table_area_splitter.setVisible(has_compare)
+        if hasattr(self, "sheet_overview_bar"):
+            self.sheet_overview_bar.setVisible(has_compare)
+        if hasattr(self, "source_summary_bar"):
+            self.source_summary_bar.setVisible(has_compare)
+        if hasattr(self, "filter_strip"):
+            self.filter_strip.setVisible(has_compare)
+        if hasattr(self, "merge_action_bar"):
+            self.merge_action_bar.setVisible(has_compare and not self.compare_only_mode.isChecked())
+            self.merge_action_bar.setMaximumHeight(0 if (not has_compare or self.compare_only_mode.isChecked()) else 16777215)
+        if not has_compare and self._current_side_panel() == "sheet":
+            self._activate_side_panel("", save=False)
+        elif has_compare and prefer_sheet and self._current_side_panel() == "":
+            self._activate_side_panel("sheet", save=False)
+        self._update_prepare_panel()
 
     def _apply_history_selection(self, index: int) -> None:
         if index <= 0:
@@ -4146,14 +4751,8 @@ class MainWindow(QMainWindow):
         self.settings["table_row_height"] = int(self.row_height_combo.currentData() or 24)
         self.settings["table_header_height"] = int(self.header_height_combo.currentData() or 32)
         if hasattr(self, "source_panel") and hasattr(self, "sheet_panel") and hasattr(self, "advanced_panel"):
-            if self.source_panel.isVisible():
-                self.settings["active_side_panel"] = "source"
-            elif self.advanced_panel.isVisible():
-                self.settings["active_side_panel"] = "settings"
-            elif self.sheet_panel.isVisible():
-                self.settings["active_side_panel"] = "sheet"
-            else:
-                self.settings["active_side_panel"] = ""
+            self.settings["active_side_panel"] = "sheet" if self.sheet_panel.isVisible() else ""
+            self.settings["active_top_panel"] = self._current_top_panel()
             self.settings["sheet_panel_collapsed"] = not self.sheet_panel.isVisible()
             self.settings["source_panel_collapsed"] = not self.source_panel.isVisible()
             self.settings["side_dock_width"] = self._last_side_dock_width
@@ -4341,6 +4940,7 @@ class MainWindow(QMainWindow):
 
     def _on_rule_changed(self) -> None:
         self._update_rule_summary()
+        self._update_prepare_panel()
         if self.left_workbook is None and self.right_workbook is None:
             return
         current_sheet = self.current_sheet_name
@@ -4362,7 +4962,8 @@ class MainWindow(QMainWindow):
 
     def _update_compare_mode(self) -> None:
         compare_only = self.compare_only_mode.isChecked()
-        if not compare_only and self.middle_model is None and self.current_sheet_name:
+        has_compare = self._has_active_compare()
+        if has_compare and not compare_only and self.middle_model is None and self.current_sheet_name:
             alignment = self.alignments.get(self.current_sheet_name)
             if alignment is not None:
                 self._ensure_middle_model(alignment)
@@ -4370,17 +4971,18 @@ class MainWindow(QMainWindow):
                 self._schedule_resize_columns()
                 self._update_detail_panel()
         if self.middle_panel is not None:
-            self.middle_panel.setVisible(not compare_only)
+            self.middle_panel.setVisible(has_compare and not compare_only)
         if self.merge_action_bar is not None:
-            self.merge_action_bar.setVisible(not compare_only)
-            self.merge_action_bar.setMaximumHeight(0 if compare_only else 16777215)
-        if getattr(self, "tables_splitter", None) is not None:
+            self.merge_action_bar.setVisible(has_compare and not compare_only)
+            self.merge_action_bar.setMaximumHeight(0 if (not has_compare or compare_only) else 16777215)
+        if has_compare and getattr(self, "tables_splitter", None) is not None:
             sizes = self.tables_splitter.sizes()
             total = sum(sizes) or 1200
             if compare_only:
                 self.tables_splitter.setSizes([total // 2, 0, total - total // 2])
             else:
                 self.tables_splitter.setSizes([int(total * 0.31), int(total * 0.38), total - int(total * 0.31) - int(total * 0.38)])
+        self._update_workspace_mode()
         mode_text = "纯比对模式：默认只加载左右对比，切到合并模式时再加载中间合并表。" if compare_only else "合并模式：已加载预合并结果，可直接人工处理。"
         self.statusBar().showMessage(mode_text, 4000)
 
@@ -4699,6 +5301,7 @@ class MainWindow(QMainWindow):
         self._cancel_sheet_state_warmup()
         self._remember_current_settings()
         self._refresh_sheet_list(schedule_warmup=False)
+        self._update_workspace_mode(prefer_sheet=True)
         first_sheet_ready_at = perf_counter()
         self._last_compare_metrics = {
             "load_ms": (source_loaded_at - self._compare_started_at) * 1000.0,
@@ -5658,6 +6261,23 @@ class MainWindow(QMainWindow):
         if first is not None:
             self._jump_to_duplicate_item(first)
 
+    def _jump_to_next_duplicate_id(self) -> None:
+        if not self._duplicate_id_rows:
+            QMessageBox.information(self, "重复ID", "当前子表没有重复 ID，或尚未右键标记检测 ID 列。")
+            return
+        self.duplicate_id_label.setVisible(True)
+        self.duplicate_id_list.setVisible(True)
+        current_row = self.duplicate_id_list.currentRow()
+        next_row = (current_row + 1) % self.duplicate_id_list.count() if current_row >= 0 else 0
+        self.duplicate_id_list.setCurrentRow(next_row)
+        item = self.duplicate_id_list.item(next_row)
+        if item is not None:
+            self._jump_to_duplicate_item(item)
+            self.statusBar().showMessage(
+                f"跳转到重复ID {next_row + 1} / {self.duplicate_id_list.count()}",
+                3000,
+            )
+
     def _show_changed_columns_summary(self) -> None:
         if self.middle_model is None and self.left_model is None:
             return
@@ -5678,15 +6298,56 @@ class MainWindow(QMainWindow):
                         break
         QMessageBox.information(self, "改动列", "\n".join(lines[:80]) if lines else "当前子表没有改动列。")
 
-    def _jump_to_row_status(self, statuses: set[str]) -> None:
+    def _jump_to_changed_row(self) -> None:
         model = self.middle_model or self.left_model or self.right_model
         if model is None:
             return
-        for source_index, row in enumerate(model.alignment.rows):
-            if row.status in statuses:
-                self._select_alignment_row(source_index)
-                return
-        self.statusBar().showMessage("当前子表没有对应行。", 3000)
+
+        def matcher(row: AlignedRow) -> bool:
+            if row.status in {"conflict", "left_only", "right_only", "deleted"}:
+                return False
+            return model._compute_row_difference(row)
+
+        self._jump_to_matching_alignment_row("改动", matcher)
+
+    def _jump_to_row_status(self, statuses: set[str], label: str = "对应") -> None:
+        self._jump_to_matching_alignment_row(label, lambda row: row.status in statuses)
+
+    def _current_selected_source_index(self, model: MergeTableModel) -> int | None:
+        for table in self._selection_tables(include_middle=True):
+            selection = table.selectionModel()
+            if selection is None:
+                continue
+            rows = [idx.row() for idx in selection.selectedRows()]
+            if not rows:
+                continue
+            visible_row = rows[0]
+            if 0 <= visible_row < len(model.visible_rows):
+                return model.visible_rows[visible_row]
+        return None
+
+    def _jump_to_matching_alignment_row(self, label: str, matcher) -> None:
+        model = self.middle_model or self.left_model or self.right_model
+        if model is None:
+            return
+        matches = [
+            source_index
+            for source_index, row in enumerate(model.alignment.rows)
+            if matcher(row)
+        ]
+        if not matches:
+            self.statusBar().showMessage(f"当前子表没有{label}行。", 3000)
+            return
+        current_source_index = self._current_selected_source_index(model)
+        target = matches[0]
+        if current_source_index is not None:
+            target = next((source_index for source_index in matches if source_index > current_source_index), matches[0])
+        self._select_alignment_row(target)
+        position = matches.index(target) + 1
+        self.statusBar().showMessage(
+            f"跳转到{label} {position} / {len(matches)}，合并行 {target + 1}",
+            3000,
+        )
 
     def _select_alignment_row(self, source_index: int) -> None:
         model = self.middle_model or self.left_model or self.right_model

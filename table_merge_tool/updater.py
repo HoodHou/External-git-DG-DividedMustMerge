@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -93,7 +94,12 @@ def check_http_zip_update(
     release_root = str(package_url or "").strip()
     if not version_target or not release_root:
         return None
-    raw_version = _download_text(version_target).strip()
+    try:
+        raw_version = _download_text(version_target).strip()
+    except Exception:
+        raw_version = _detect_github_latest_version(version_target, release_root)
+        if not raw_version:
+            raise
     latest_version = _parse_version(raw_version)
     if not latest_version:
         raise RuntimeError(f"更新版本文件缺少有效版本号: {version_target}")
@@ -270,6 +276,35 @@ def _download_text(url: str) -> str:
     request = urllib.request.Request(url, headers={"User-Agent": "FenJiuBiHe-Updater"})
     with urllib.request.urlopen(request, timeout=15) as response:
         return response.read().decode("utf-8-sig", errors="replace")
+
+
+def _detect_github_latest_version(*urls: str) -> str:
+    for url in urls:
+        repo = _github_repo_from_release_url(url)
+        if not repo:
+            continue
+        latest_url = f"https://github.com/{repo}/releases/latest"
+        request = urllib.request.Request(latest_url, headers={"User-Agent": "FenJiuBiHe-Updater"})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            final_url = response.geturl()
+            version = _github_tag_from_url(final_url)
+            if version:
+                return version
+            text = response.read().decode("utf-8", errors="replace")
+        match = re.search(r"/releases/tag/([^\"?#/<>\s]+)", text)
+        if match:
+            return urllib.parse.unquote(match.group(1))
+    return ""
+
+
+def _github_repo_from_release_url(url: str) -> str:
+    match = re.search(r"https://github\.com/([^/\s]+/[^/\s]+)/releases/", str(url or ""))
+    return match.group(1) if match else ""
+
+
+def _github_tag_from_url(url: str) -> str:
+    match = re.search(r"/releases/tag/([^/?#]+)", str(url or ""))
+    return urllib.parse.unquote(match.group(1)) if match else ""
 
 
 def _download_file(url: str, output_path: Path, progress_callback: ProgressCallback | None = None) -> None:
