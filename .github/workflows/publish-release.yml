@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install PyInstaller PySide6 lxml openpyxl requests google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
+          pip install PyInstaller PySide6 lxml openpyxl requests google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2 pytest
 
       - name: Run tests
         run: python -m pytest
