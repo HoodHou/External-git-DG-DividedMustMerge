@@ -6641,7 +6641,7 @@ class MainWindow(QMainWindow):
         output_path, selected_filter = QFileDialog.getSaveFileName(
             self,
             "导出结果",
-            str(Path.cwd() / f"{self._suggest_output_stem(self.left_workbook)}_merged.xml"),
+            str(Path.cwd() / f"{self._suggest_output_stem(self.left_workbook)}.xml"),
             "Excel XML (*.xml)",
         )
         if not output_path:
@@ -6974,7 +6974,7 @@ class MainWindow(QMainWindow):
                     comparison_options,
                     manual_key_fields,
                 )
-                output_path = output_dir / f"{Path(name).stem}_merged.xml"
+                output_path = output_dir / f"{Path(name).stem}.xml"
                 export_workbook(
                     template_workbook,
                     compare_workbook,
